@@ -2,11 +2,13 @@
 import { initializeApp } from "firebase/app";
 import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User } from "firebase/auth";
 import { firebaseConfig } from "./firebaseConfig";
+import { getFunctions } from "firebase/functions";
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 
 const auth = getAuth(app);
+export const functions = getFunctions(undefined, 'europe-west2');
 
 /**
  * Signs the user in with a Google popup.

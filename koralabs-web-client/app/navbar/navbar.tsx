@@ -7,6 +7,7 @@ import SignIn from "./sign-in";
 import { onAuthStateChangedHelper } from "../firebase/firebase";
 import { useEffect, useState } from "react";
 import { User } from "@firebase/auth/cordova";
+import Upload from "./upload";
 
 export default function Navbar() {
     const [user, setUser] = useState<User | null>(null);
@@ -19,11 +20,15 @@ export default function Navbar() {
     });
     
     return (
-        <nav className={styles.nav}>
-            <Link href="/">
-                <Image src="/youtube-logo.svg" alt="Logo" width={90} height={80} /> 
-            </Link>
-            <SignIn user={user} />
-        </nav>
-    ); 
+    <nav className={styles.nav}>
+        <Link href="/">
+        <Image width={90} height={20}
+            src="/youtube-logo.svg" alt="YouTube Logo"/>
+        </Link>
+        { 
+        user && <Upload />
+        }
+        <SignIn user={user} />
+    </nav>
+    );
 }
