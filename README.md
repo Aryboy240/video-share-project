@@ -1,6 +1,8 @@
-<img src="koralabs-web-client/public/images/logos/KL-White.png" alt="KoraLabs Logo" width="200"/>
+<div align="center">
+  <img src="koralabs-web-client/public/images/logos/KL-White.png" alt="KoraLabs Logo" width="200"/>
 
-*KoraLabs video service*
+  *KoraLabs video service*
+</div>
 
 ---
 
