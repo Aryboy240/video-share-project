@@ -1,0 +1,24 @@
+/* Global styles for premium video platform */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  background-color: #121212;
+  color: #ffffff;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+  line-height: 1.6;
+}
+
+/* Cyan color palette */
+:root {
+  --primary-accent: #1ac8e8;
+  --highlight-glow: #83faff;
+}
+
+/* Ensure the dark theme extends to all elements */
+html, body, #__next {
+  background-color: #121212 !important;
+}

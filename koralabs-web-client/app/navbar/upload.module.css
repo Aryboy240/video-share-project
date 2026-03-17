@@ -6,16 +6,21 @@
   display: flex; /* Use Flexbox to center the text */
   justify-content: center; /* Center text horizontally */
   align-items: center; /* Center text vertically */
-  width: 25px;
-  height: 25px;
+  width: 40px;
+  height: 40px;
   border-radius: 50%; /* Make it circular */
-  color: black; /* Color of the text */
+  color: #ffffff; /* Color of the text */
   border: none;
   cursor: pointer;
-  font-size: 10px;
+  font-size: 16px;
   padding: 0.4em;
+  background-color: #333;
+  transition: all 0.3s ease;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
 }
 
 .uploadButton:hover {
-  background-color: rgb(230, 230, 230);
+  background-color: #444;
+  transform: scale(1.05);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
 }
