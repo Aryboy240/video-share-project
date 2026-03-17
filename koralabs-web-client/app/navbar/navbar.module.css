@@ -2,5 +2,63 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 1rem;
+    padding: 1rem 2rem;
+    background-color: #1e1e1e;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+}
+
+.navLink {
+    display: flex;
+    align-items: center;
+    text-decoration: none;
+    color: white;
+    gap: 10px;
+}
+
+.navLink {
+  text-decoration: none;
+}
+
+.navLink a {
+  text-decoration: none;
+}
+.navLink p {
+    color: #f0f0f0;
+    font-family: inherit;
+    margin: 0;
+    font-size: 18px;
+    font-weight: 600;
+}
+
+/* Accent colors */
+.navLink:hover {
+    color: var(--primary-accent);
+}
+
+.signin {
+    border-color: #444;
+    color: #ffffff;
+    background-color: transparent;
+    transition: all 0.3s ease;
+}
+
+.signin:hover {
+    background-color: #333;
+    border-color: var(--primary-accent);
+    color: var(--primary-accent);
+}
+
+.uploadButton {
+    background-color: #333;
+    transition: all 0.3s ease;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+}
+
+.uploadButton:hover {
+    background-color: var(--primary-accent);
+    transform: scale(1.05);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3), 0 0 10px var(--highlight-glow);
 }
