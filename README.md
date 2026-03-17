@@ -1,4 +1,6 @@
-# Koralabs Video Sharing Platform
+![KoraLabs Logo](koralabs-web-client/public/images/logos/KL-White.png)
+
+*KoraLabs video service*
 
 A modern video sharing platform built with Next.js, Firebase, and Google Cloud Services.
 
