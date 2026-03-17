@@ -1,4 +1,4 @@
-![KoraLabs Logo](koralabs-web-client/public/images/logos/KL-White.png){width=200px}
+<img src="koralabs-web-client/public/images/logos/KL-White.png" alt="KoraLabs Logo" width="200"/>
 
 *KoraLabs video service*
 
