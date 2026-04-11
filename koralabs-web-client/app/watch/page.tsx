@@ -1,15 +1,28 @@
 'use client';
 
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useState } from 'react';
+import { User as FirebaseAuthUser } from 'firebase/auth';
 import styles from './page.module.css';
-import { getVideos, getUserById, formatUploader, Video, User } from '../firebase/functions';
+import { getVideos, getUserById, formatUploader, deleteVideo, toggleSubscription, getSubscriptionStatus, Video, User } from '../firebase/functions';
+import { onAuthStateChangedHelper } from '../firebase/firebase';
 
 function WatchContent() {
+  const router = useRouter();
   const videoPrefix = 'https://storage.googleapis.com/koralabs-processed-videos/';
   const videoSrc = useSearchParams().get('v');
   const [video, setVideo] = useState<Video | null>(null);
   const [uploader, setUploader] = useState<User | null>(null);
+  const [currentUser, setCurrentUser] = useState<FirebaseAuthUser | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [subscribed, setSubscribed] = useState(false);
+  const [subscriberCount, setSubscriberCount] = useState<number>(0);
+  const [togglingSub, setTogglingSub] = useState(false);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChangedHelper((u) => setCurrentUser(u));
+    return () => unsubscribe();
+  }, []);
 
   useEffect(() => {
     if (!videoSrc) return;
@@ -25,9 +38,55 @@ function WatchContent() {
       return;
     }
     getUserById(video.uid)
-      .then((u) => setUploader(u))
+      .then((u) => {
+        setUploader(u);
+        setSubscriberCount(u?.subscriberCount ?? 0);
+      })
       .catch(() => setUploader(null));
   }, [video?.uid]);
+
+  useEffect(() => {
+    if (!currentUser || !video?.uid || currentUser.uid === video.uid) {
+      setSubscribed(false);
+      return;
+    }
+    getSubscriptionStatus(video.uid)
+      .then((res) => setSubscribed(res.subscribed))
+      .catch(() => setSubscribed(false));
+  }, [currentUser, video?.uid]);
+
+  const canSubscribe = !!currentUser && !!video?.uid && currentUser.uid !== video.uid;
+
+  const handleToggleSubscription = async () => {
+    if (!video?.uid || togglingSub) return;
+    setTogglingSub(true);
+    try {
+      const res = await toggleSubscription(video.uid);
+      setSubscribed(res.subscribed);
+      setSubscriberCount((c) => c + (res.subscribed ? 1 : -1));
+    } catch (err) {
+      alert(`Failed to update subscription: ${err}`);
+    } finally {
+      setTogglingSub(false);
+    }
+  };
+
+  const canDelete = !!currentUser && !!video?.uid && currentUser.uid === video.uid;
+
+  const handleDelete = async () => {
+    if (!video?.id || deleting) return;
+    if (!window.confirm('Are you sure you want to delete this video? This action cannot be undone.')) {
+      return;
+    }
+    setDeleting(true);
+    try {
+      await deleteVideo(video.id);
+      router.push('/');
+    } catch (err) {
+      alert(`Failed to delete video: ${err}`);
+      setDeleting(false);
+    }
+  };
 
   const title = video?.title && video.title.length > 0 ? video.title : 'Untitled';
   const description = video?.description && video.description.length > 0 ? video.description : null;
@@ -72,7 +131,29 @@ function WatchContent() {
               <div className={styles.channelInfo}>
                 <h3 className={styles.channelName}>KoraLabs Video</h3>
               </div>
-              <button className={styles.subscribeButton}>Subscribe</button>
+              {canSubscribe && (
+                <button
+                  type="button"
+                  className={subscribed ? styles.unsubscribeButton : styles.subscribeButton}
+                  onClick={handleToggleSubscription}
+                  disabled={togglingSub}
+                >
+                  {subscribed ? 'Unsubscribe' : 'Subscribe'}
+                </button>
+              )}
+              <span className={styles.subscriberCount}>
+                {subscriberCount} {subscriberCount === 1 ? 'subscriber' : 'subscribers'}
+              </span>
+              {canDelete && (
+                <button
+                  type="button"
+                  className={styles.deleteButton}
+                  onClick={handleDelete}
+                  disabled={deleting}
+                >
+                  {deleting ? 'Deleting…' : 'Delete'}
+                </button>
+              )}
             </div>
           </div>
 

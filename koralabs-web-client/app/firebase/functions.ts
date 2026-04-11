@@ -4,6 +4,9 @@ import { functions } from './firebase';
 const generateUploadUrlFunction = httpsCallable(functions, 'generateUploadUrl');
 const getVideosFunction = httpsCallable(functions, 'getVideos');
 const getUserByIdFunction = httpsCallable(functions, 'getUserById');
+const deleteVideoFunction = httpsCallable(functions, 'deleteVideo');
+const toggleSubscriptionFunction = httpsCallable(functions, 'toggleSubscription');
+const getSubscriptionStatusFunction = httpsCallable(functions, 'getSubscriptionStatus');
 
 export async function uploadVideo(
   file: File,
@@ -65,6 +68,7 @@ export interface User {
   email?: string,
   displayName?: string,
   photoUrl?: string,
+  subscriberCount?: number,
 }
 
 export async function getUserById(uid: string): Promise<User | null> {
@@ -74,4 +78,19 @@ export async function getUserById(uid: string): Promise<User | null> {
 
 export function formatUploader(user: User | null | undefined): string {
   return user?.displayName || user?.email || 'Unknown';
+}
+
+export async function deleteVideo(videoId: string): Promise<{ success: boolean }> {
+  const response: any = await deleteVideoFunction({ videoId });
+  return response.data as { success: boolean };
+}
+
+export async function toggleSubscription(channelUid: string): Promise<{ subscribed: boolean }> {
+  const response: any = await toggleSubscriptionFunction({ channelUid });
+  return response.data as { subscribed: boolean };
+}
+
+export async function getSubscriptionStatus(channelUid: string): Promise<{ subscribed: boolean }> {
+  const response: any = await getSubscriptionStatusFunction({ channelUid });
+  return response.data as { subscribed: boolean };
 }

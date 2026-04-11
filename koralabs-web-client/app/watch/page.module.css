@@ -132,6 +132,62 @@
   color: #000;
 }
 
+.subscribeButton:disabled,
+.unsubscribeButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.unsubscribeButton {
+  border: 1px solid #555;
+  color: #ccc;
+  background-color: #2a2a2a;
+  padding: 8px 16px;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.unsubscribeButton:hover:not(:disabled) {
+  background-color: #333;
+  color: #fff;
+  border-color: #777;
+}
+
+.subscriberCount {
+  margin-left: 10px;
+  color: #aaa;
+  font-size: 13px;
+}
+
+.deleteButton {
+  border: 1px solid #ff5c5c;
+  color: #ff5c5c;
+  background-color: transparent;
+  padding: 8px 16px;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  margin-left: 8px;
+}
+
+.deleteButton:hover:not(:disabled) {
+  background-color: #ff5c5c;
+  color: #fff;
+  box-shadow: 0 0 10px rgba(255, 92, 92, 0.4);
+}
+
+.deleteButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .commentsSection {
   background-color: #1a1a1a;
   border-radius: 8px;
