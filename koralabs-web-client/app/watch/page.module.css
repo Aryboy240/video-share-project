@@ -52,6 +52,12 @@
   color: #ffffff;
 }
 
+.uploader {
+  margin: 0 0 10px 0;
+  color: #aaa;
+  font-size: 14px;
+}
+
 .metadataRow {
   display: flex;
   gap: 10px;

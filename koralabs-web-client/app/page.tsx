@@ -1,10 +1,25 @@
 import styles from './page.module.css'
 import Image from 'next/image';
 import Link from 'next/link';
-import {getVideos} from './firebase/functions';
+import {getVideos, getUserById, formatUploader, User} from './firebase/functions';
 
 export default async function Home() {
   const videos = await getVideos();
+
+  const uniqueUids = Array.from(
+    new Set(videos.map((v) => v.uid).filter((u): u is string => !!u))
+  );
+  const userEntries = await Promise.all(
+    uniqueUids.map(async (uid) => {
+      try {
+        const user = await getUserById(uid);
+        return [uid, user] as const;
+      } catch {
+        return [uid, null] as const;
+      }
+    })
+  );
+  const userMap = new Map<string, User | null>(userEntries);
 
   return (
     <main className={styles.main}>
@@ -27,7 +42,7 @@ export default async function Home() {
                   {video.description && video.description.length > 0 && (
                     <p className={styles.description}>{video.description}</p>
                   )}
-                  <p className={styles.uploader}>Uploader: {video.uid || 'Unknown'}</p>
+                  <p className={styles.uploader}>Uploader: {formatUploader(video.uid ? userMap.get(video.uid) : null)}</p>
                   <div className={styles.statusContainer}>
                     <span className={`${styles.statusBadge} ${video.status === 'processing' ? styles.processing : styles.processed}`}>
                       {video.status === 'processing' ? 'Processing' : 'Processed'}

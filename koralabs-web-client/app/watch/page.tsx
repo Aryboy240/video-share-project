@@ -3,12 +3,13 @@
 import { useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useState } from 'react';
 import styles from './page.module.css';
-import { getVideos, Video } from '../firebase/functions';
+import { getVideos, getUserById, formatUploader, Video, User } from '../firebase/functions';
 
 function WatchContent() {
   const videoPrefix = 'https://storage.googleapis.com/koralabs-processed-videos/';
   const videoSrc = useSearchParams().get('v');
   const [video, setVideo] = useState<Video | null>(null);
+  const [uploader, setUploader] = useState<User | null>(null);
 
   useEffect(() => {
     if (!videoSrc) return;
@@ -18,8 +19,19 @@ function WatchContent() {
     });
   }, [videoSrc]);
 
+  useEffect(() => {
+    if (!video?.uid) {
+      setUploader(null);
+      return;
+    }
+    getUserById(video.uid)
+      .then((u) => setUploader(u))
+      .catch(() => setUploader(null));
+  }, [video?.uid]);
+
   const title = video?.title && video.title.length > 0 ? video.title : 'Untitled';
   const description = video?.description && video.description.length > 0 ? video.description : null;
+  const uploaderLabel = formatUploader(uploader);
 
   return (
     <div className={styles.watchPage}>
@@ -31,6 +43,8 @@ function WatchContent() {
         <div className={styles.mainColumn}>
           <div className={styles.videoInfoSection}>
             <h1 className={styles.videoTitle}>{title}</h1>
+
+            <p className={styles.uploader}>Uploader: {uploaderLabel}</p>
 
             <div className={styles.metadataRow}>
               <span className={styles.viewCount}>240 views</span>
