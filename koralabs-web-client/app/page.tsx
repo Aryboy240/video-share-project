@@ -1,7 +1,11 @@
-import styles from './page.module.css'
+'use client';
+
+import { useState, useEffect, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 import Link from 'next/link';
-import { getVideos, getUserById, formatUploader, User } from './firebase/functions';
+import { getVideos, getUserById, formatUploader, User, Video } from './firebase/functions';
+import styles from './page.module.css';
 
 function formatViewCount(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, '')}M views`;
@@ -34,74 +38,133 @@ function parseTimestamp(id?: string): number | null {
   return Number.isFinite(ts) ? ts : null;
 }
 
-export default async function Home() {
-  const videos = await getVideos();
+function VideoCard({ video, userMap }: { video: Video; userMap: Map<string, User | null> }) {
+  const uploader = video.uid ? userMap.get(video.uid) : null;
+  const uploaderName = formatUploader(uploader);
+  const initial = uploaderName.slice(0, 1).toUpperCase();
+  const ts = parseTimestamp(video.id);
+  const thumbSrc =
+    video.thumbnailUrl && video.thumbnailUrl.length > 0
+      ? video.thumbnailUrl
+      : '/images/thumbnails/thumbnail.png';
 
-  const uniqueUids = Array.from(
-    new Set(videos.map((v) => v.uid).filter((u): u is string => !!u))
+  return (
+    <Link href={`/watch?v=${video.filename}`} key={video.id} className={styles.cardLink}>
+      <div className={styles.videoCard}>
+        <div className={styles.thumbnailContainer}>
+          <Image
+            src={thumbSrc}
+            alt={video.title || 'Video thumbnail'}
+            width={480}
+            height={270}
+            className={styles.thumbnail}
+            unoptimized
+          />
+        </div>
+        <div className={styles.cardMeta}>
+          <div className={styles.cardAvatar}>
+            {uploader?.photoUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={uploader.photoUrl} alt={uploaderName} className={styles.cardAvatarImg} />
+            ) : (
+              <span className={styles.cardAvatarInitials}>{initial}</span>
+            )}
+          </div>
+          <div className={styles.cardInfo}>
+            <h3 className={styles.videoTitle}>{video.title || 'Untitled'}</h3>
+            <p className={styles.cardUploaderName}>{uploaderName}</p>
+            <p className={styles.cardStats}>
+              {formatViewCount(video.viewCount ?? 0)}
+              {ts !== null && <> &bull; {timeAgo(ts)}</>}
+            </p>
+          </div>
+        </div>
+      </div>
+    </Link>
   );
-  const userEntries = await Promise.all(
-    uniqueUids.map(async (uid) => {
+}
+
+function HomeContent() {
+  const searchParams = useSearchParams();
+  const query = searchParams.get('search')?.trim() ?? '';
+
+  const [allVideos, setAllVideos] = useState<Video[]>([]);
+  const [userMap, setUserMap] = useState<Map<string, User | null>>(new Map());
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      setLoading(true);
       try {
-        const user = await getUserById(uid);
-        return [uid, user] as const;
-      } catch {
-        return [uid, null] as const;
+        const videos = await getVideos();
+        if (cancelled) return;
+        const uniqueUids = Array.from(
+          new Set(videos.map((v) => v.uid).filter((u): u is string => !!u))
+        );
+        const userEntries = await Promise.all(
+          uniqueUids.map(async (uid) => {
+            try { return [uid, await getUserById(uid)] as const; }
+            catch { return [uid, null] as const; }
+          })
+        );
+        if (cancelled) return;
+        setAllVideos(videos);
+        setUserMap(new Map(userEntries));
+      } catch (err) {
+        console.error('Failed to load videos', err);
+      } finally {
+        if (!cancelled) setLoading(false);
       }
-    })
-  );
-  const userMap = new Map<string, User | null>(userEntries);
+    }
+    load();
+    return () => { cancelled = true; };
+  }, []);
+
+  const filteredVideos = query
+    ? allVideos.filter((v) => {
+        const q = query.toLowerCase();
+        return (
+          (v.title ?? '').toLowerCase().includes(q) ||
+          (v.uid ?? '').toLowerCase().includes(q)
+        );
+      })
+    : allVideos;
 
   return (
     <main className={styles.main}>
-      <div className={styles.videoGrid}>
-        {videos.map((video) => {
-          const uploader = video.uid ? userMap.get(video.uid) : null;
-          const uploaderName = formatUploader(uploader);
-          const initial = uploaderName.slice(0, 1).toUpperCase();
-          const ts = parseTimestamp(video.id);
-          const thumbSrc = video.thumbnailUrl && video.thumbnailUrl.length > 0
-            ? video.thumbnailUrl
-            : '/images/thumbnails/thumbnail.png';
-
-          return (
-            <Link href={`/watch?v=${video.filename}`} key={video.id} className={styles.cardLink}>
-              <div className={styles.videoCard}>
-                <div className={styles.thumbnailContainer}>
-                  <Image
-                    src={thumbSrc}
-                    alt={video.title || 'Video thumbnail'}
-                    width={480}
-                    height={270}
-                    className={styles.thumbnail}
-                    unoptimized
-                  />
-                </div>
-                <div className={styles.cardMeta}>
-                  <div className={styles.cardAvatar}>
-                    {uploader?.photoUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={uploader.photoUrl} alt={uploaderName} className={styles.cardAvatarImg} />
-                    ) : (
-                      <span className={styles.cardAvatarInitials}>{initial}</span>
-                    )}
-                  </div>
-                  <div className={styles.cardInfo}>
-                    <h3 className={styles.videoTitle}>{video.title || 'Untitled'}</h3>
-                    <p className={styles.cardUploaderName}>{uploaderName}</p>
-                    <p className={styles.cardStats}>
-                      {formatViewCount(video.viewCount ?? 0)}
-                      {ts !== null && <> &bull; {timeAgo(ts)}</>}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </Link>
-          );
-        })}
-      </div>
+      {query && (
+        <p className={styles.searchHeader}>
+          Results for <strong>&lsquo;{query}&rsquo;</strong>
+        </p>
+      )}
+      {loading ? (
+        <p className={styles.loadingState}>Loading videos…</p>
+      ) : filteredVideos.length === 0 ? (
+        <p className={styles.emptyState}>
+          {query ? `No videos found for '${query}'.` : 'No videos yet.'}
+        </p>
+      ) : (
+        <div className={styles.videoGrid}>
+          {filteredVideos.map((video) => (
+            <VideoCard key={video.id} video={video} userMap={userMap} />
+          ))}
+        </div>
+      )}
     </main>
   );
 }
 
-export const revalidate = 30;
+export default function Home() {
+  return (
+    <Suspense
+      fallback={
+        <main className={styles.main}>
+          <p className={styles.loadingState}>Loading videos…</p>
+        </main>
+      }
+    >
+      <HomeContent />
+    </Suspense>
+  );
+}
