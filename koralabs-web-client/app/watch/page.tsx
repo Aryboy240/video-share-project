@@ -32,11 +32,19 @@ function WatchContent() {
   const title = video?.title && video.title.length > 0 ? video.title : 'Untitled';
   const description = video?.description && video.description.length > 0 ? video.description : null;
   const uploaderLabel = formatUploader(uploader);
+  const posterUrl = video?.thumbnailUrl && video.thumbnailUrl.length > 0
+    ? video.thumbnailUrl
+    : '/images/thumbnails/thumbnail.png';
 
   return (
     <div className={styles.watchPage}>
       <div className={styles.videoContainer}>
-        <video controls src={videoPrefix + videoSrc} className={styles.videoPlayer} />
+        <video
+          controls
+          src={videoPrefix + videoSrc}
+          poster={posterUrl}
+          className={styles.videoPlayer}
+        />
       </div>
 
       <div className={styles.contentRow}>

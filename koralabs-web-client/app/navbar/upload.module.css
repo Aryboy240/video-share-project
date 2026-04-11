@@ -112,6 +112,84 @@
   margin-top: 4px;
 }
 
+.thumbnailInput {
+  display: none;
+}
+
+.thumbnailRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.thumbnailPickButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 14px;
+  border-radius: 6px;
+  background-color: transparent;
+  border: 1px solid #444;
+  color: #ccc;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.thumbnailPickButton:hover {
+  border-color: var(--primary-accent);
+  color: var(--primary-accent);
+  box-shadow: 0 0 8px rgba(26, 200, 232, 0.25);
+}
+
+.thumbnailPickButtonDisabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.thumbnailPreviewWrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.thumbnailPreview {
+  width: 96px;
+  height: 54px;
+  object-fit: cover;
+  border-radius: 4px;
+  border: 1px solid #333;
+  background-color: #0f0f0f;
+  display: block;
+}
+
+.thumbnailRemove {
+  background-color: transparent;
+  border: 1px solid #444;
+  color: #aaa;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.thumbnailRemove:hover:not(:disabled) {
+  border-color: #ff6b6b;
+  color: #ff6b6b;
+}
+
+.thumbnailRemove:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .modalActions {
   display: flex;
   justify-content: flex-end;

@@ -10,7 +10,28 @@ export default function Upload() {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [thumbnail, setThumbnail] = useState<File | null>(null);
+  const [thumbnailPreview, setThumbnailPreview] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const thumbnailInputRef = useRef<HTMLInputElement>(null);
+
+  const clearFileInput = () => {
+    if (inputRef.current) {
+      inputRef.current.value = "";
+    }
+  };
+
+  const clearThumbnailInput = () => {
+    if (thumbnailInputRef.current) {
+      thumbnailInputRef.current.value = "";
+    }
+  };
+
+  const revokePreview = (url: string | null) => {
+    if (url) {
+      URL.revokeObjectURL(url);
+    }
+  };
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const picked = event.target.files?.item(0) ?? null;
@@ -18,16 +39,41 @@ export default function Upload() {
       setFile(picked);
       setTitle("");
       setDescription("");
+      revokePreview(thumbnailPreview);
+      setThumbnail(null);
+      setThumbnailPreview(null);
+      clearThumbnailInput();
     }
+    clearFileInput();
+  };
+
+  const handleThumbnailChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const picked = event.target.files?.item(0) ?? null;
+    if (picked) {
+      revokePreview(thumbnailPreview);
+      setThumbnail(picked);
+      setThumbnailPreview(URL.createObjectURL(picked));
+    }
+    clearThumbnailInput();
+  };
+
+  const removeThumbnail = () => {
+    revokePreview(thumbnailPreview);
+    setThumbnail(null);
+    setThumbnailPreview(null);
+    clearThumbnailInput();
   };
 
   const closeModal = () => {
+    clearFileInput();
+    clearThumbnailInput();
+    revokePreview(thumbnailPreview);
     setFile(null);
     setTitle("");
     setDescription("");
-    if (inputRef.current) {
-      inputRef.current.value = "";
-    }
+    setThumbnail(null);
+    setThumbnailPreview(null);
+    setUploading(false);
   };
 
   const canSubmit = !!file && title.trim().length > 0 && !uploading;
@@ -36,7 +82,7 @@ export default function Upload() {
     if (!file || !title.trim()) return;
     setUploading(true);
     try {
-      const response = await uploadVideo(file, title.trim(), description.trim());
+      const response = await uploadVideo(file, title.trim(), description.trim(), thumbnail);
       alert(`File uploaded successfully. Server responded with: ${JSON.stringify(response)}`);
       closeModal();
     } catch (error) {
@@ -95,6 +141,45 @@ export default function Upload() {
               rows={4}
             />
             <div className={styles.charCount}>{description.length}/500</div>
+
+            <label className={styles.fieldLabel} htmlFor="video-thumbnail">
+              Thumbnail
+            </label>
+            <input
+              id="video-thumbnail"
+              ref={thumbnailInputRef}
+              className={styles.thumbnailInput}
+              type="file"
+              accept="image/*"
+              onChange={handleThumbnailChange}
+              disabled={uploading}
+            />
+            <div className={styles.thumbnailRow}>
+              <label
+                htmlFor="video-thumbnail"
+                className={`${styles.thumbnailPickButton}${uploading ? " " + styles.thumbnailPickButtonDisabled : ""}`}
+              >
+                {thumbnail ? "Change image" : "Choose image (optional)"}
+              </label>
+              {thumbnailPreview && (
+                <div className={styles.thumbnailPreviewWrap}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={thumbnailPreview}
+                    alt="Thumbnail preview"
+                    className={styles.thumbnailPreview}
+                  />
+                  <button
+                    type="button"
+                    className={styles.thumbnailRemove}
+                    onClick={removeThumbnail}
+                    disabled={uploading}
+                  >
+                    Remove
+                  </button>
+                </div>
+              )}
+            </div>
 
             <div className={styles.modalActions}>
               <button

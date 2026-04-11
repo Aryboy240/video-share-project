@@ -30,11 +30,12 @@ export default async function Home() {
               <div className={styles.videoCard}>
                 <div className={styles.thumbnailContainer}>
                   <Image
-                    src={'/images/thumbnails/thumbnail.png'} // Placeholder thumbnail
+                    src={video.thumbnailUrl && video.thumbnailUrl.length > 0 ? video.thumbnailUrl : '/images/thumbnails/thumbnail.png'}
                     alt={video.title || 'Video thumbnail'}
                     width={300}
                     height={169}
                     className={styles.thumbnail}
+                    unoptimized
                   />
                 </div>
                 <div className={styles.cardContent}>
