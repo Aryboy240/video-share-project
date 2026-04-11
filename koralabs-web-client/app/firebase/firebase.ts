@@ -7,7 +7,7 @@ import { getFunctions } from "firebase/functions";
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 
-const auth = getAuth(app);
+export const auth = getAuth(app);
 export const functions = getFunctions(undefined, 'europe-west2');
 
 /**

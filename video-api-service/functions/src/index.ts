@@ -727,3 +727,121 @@ export const deleteVideo = onCall(
     return {success: true};
   }
 );
+
+// ── Admin functions ──────────────────────────────────────────────────────────
+
+const adminCollectionId = "admins";
+
+async function requireAdmin(uid: string): Promise<void> {
+  const snap = await firestore.collection(adminCollectionId).doc(uid).get();
+  if (!snap.exists) {
+    throw new functions.https.HttpsError(
+      "permission-denied",
+      "Admin access required."
+    );
+  }
+}
+
+
+export const checkAdminStatus = onCall(
+  {maxInstances: 1, region: "europe-west2"},
+  async (request) => {
+    if (!request.auth) return {isAdmin: false};
+    const snap = await firestore
+      .collection(adminCollectionId).doc(request.auth.uid).get();
+    return {isAdmin: snap.exists};
+  }
+);
+
+export const adminGetAllVideos = onCall(
+  {maxInstances: 1, region: "europe-west2"},
+  async (request) => {
+    if (!request.auth) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "The function must be called while authenticated."
+      );
+    }
+    await requireAdmin(request.auth.uid);
+
+    const snap = await firestore
+      .collection(videoCollectionId)
+      .orderBy("id", "desc")
+      .limit(100)
+      .get();
+    return snap.docs.map((d) => d.data());
+  }
+);
+
+export const adminDeleteVideo = onCall(
+  {maxInstances: 1, region: "europe-west2"},
+  async (request) => {
+    if (!request.auth) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "The function must be called while authenticated."
+      );
+    }
+    await requireAdmin(request.auth.uid);
+
+    const videoId = request.data?.videoId;
+    if (typeof videoId !== "string" || !videoId) {
+      throw new functions.https.HttpsError(
+        "invalid-argument", "A videoId is required."
+      );
+    }
+
+    const docRef = firestore.collection(videoCollectionId).doc(videoId);
+    const snapshot = await docRef.get();
+    if (!snapshot.exists) {
+      throw new functions.https.HttpsError("not-found", "Video not found.");
+    }
+
+    const video = snapshot.data() ?? {};
+    const processedBucket = storage.bucket(processedVideoBucketName);
+    const resolutions = Array.isArray(video.resolutions) ?
+      video.resolutions as string[] : [];
+
+    if (resolutions.length > 0) {
+      await Promise.all(
+        resolutions.map(async (res: string) => {
+          const resFile = `${videoId}_${res}.mp4`;
+          try {
+            await processedBucket.file(resFile).delete();
+          } catch (err) {
+            logger.warn(`Admin: failed to delete ${resFile}`, err);
+          }
+        })
+      );
+    } else if (
+      typeof video.filename === "string" && video.filename.length > 0
+    ) {
+      try {
+        await processedBucket.file(video.filename).delete();
+      } catch (err) {
+        logger.warn(`Admin: failed to delete ${video.filename}`, err);
+      }
+    }
+
+    if (
+      typeof video.thumbnailUrl === "string" &&
+      video.thumbnailUrl.length > 0
+    ) {
+      const prefix =
+        `https://storage.googleapis.com/${processedVideoBucketName}/`;
+      if (video.thumbnailUrl.startsWith(prefix)) {
+        const thumbnailPath = video.thumbnailUrl.slice(prefix.length);
+        try {
+          await processedBucket.file(thumbnailPath).delete();
+        } catch (err) {
+          logger.warn(
+            `Admin: failed to delete thumbnail ${thumbnailPath}`, err
+          );
+        }
+      }
+    }
+
+    await docRef.delete();
+    return {success: true};
+  }
+);

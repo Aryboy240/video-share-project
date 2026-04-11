@@ -55,6 +55,7 @@ function StudioContent() {
   const [thumbnailPreview, setThumbnailPreview] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [thumbnailError, setThumbnailError] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const thumbnailInputRef = useRef<HTMLInputElement>(null);
@@ -106,6 +107,7 @@ function StudioContent() {
     setThumbnailPreview(video.thumbnailUrl || null);
     setSaving(false);
     setDragOver(false);
+    setThumbnailError(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
     if (thumbnailInputRef.current) thumbnailInputRef.current.value = '';
     setModalOpen(true);
@@ -119,6 +121,42 @@ function StudioContent() {
       openEditModal(target);
     }
   }, [editParam, videos, modalOpen, openEditModal]);
+
+  const validateThumbnail = (file: File): Promise<string | null> => {
+    return new Promise((resolve) => {
+      const allowed = ['image/jpeg', 'image/png'];
+      if (!allowed.includes(file.type)) {
+        resolve('Only JPG/JPEG and PNG images are allowed.');
+        return;
+      }
+      if (file.size > 2 * 1024 * 1024) {
+        resolve('Image must be 2 MB or smaller.');
+        return;
+      }
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        const { naturalWidth: w, naturalHeight: h } = img;
+        if (w < 640) {
+          resolve('Image must be at least 640 px wide.');
+          return;
+        }
+        const ratio = w / h;
+        const target = 16 / 9;
+        if (Math.abs(ratio - target) / target > 0.05) {
+          resolve('Image must have a 16:9 aspect ratio (e.g. 1280×720, 1920×1080).');
+          return;
+        }
+        resolve(null);
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        resolve('Could not read the image file.');
+      };
+      img.src = url;
+    });
+  };
 
   const revokePreview = (url: string | null) => {
     if (url && url.startsWith('blob:')) URL.revokeObjectURL(url);
@@ -136,6 +174,7 @@ function StudioContent() {
     setThumbnailPreview(null);
     setSaving(false);
     setDragOver(false);
+    setThumbnailError(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
     if (thumbnailInputRef.current) thumbnailInputRef.current.value = '';
   };
@@ -175,19 +214,25 @@ function StudioContent() {
     }
   };
 
-  const handleThumbnailChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleThumbnailChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const picked = e.target.files?.item(0) ?? null;
-    if (picked) {
-      revokePreview(thumbnailPreview);
-      setThumbnail(picked);
-      setThumbnailPreview(URL.createObjectURL(picked));
-    }
     if (thumbnailInputRef.current) thumbnailInputRef.current.value = '';
+    if (!picked) return;
+    const error = await validateThumbnail(picked);
+    if (error) {
+      setThumbnailError(error);
+      return;
+    }
+    setThumbnailError(null);
+    revokePreview(thumbnailPreview);
+    setThumbnail(picked);
+    setThumbnailPreview(URL.createObjectURL(picked));
   };
 
   const removeThumbnail = () => {
     revokePreview(thumbnailPreview);
     setThumbnail(null);
+    setThumbnailError(null);
     // In edit mode revert to the existing thumbnail, in upload mode clear
     setThumbnailPreview(isEditMode ? (editingVideo?.thumbnailUrl || null) : null);
     if (thumbnailInputRef.current) thumbnailInputRef.current.value = '';
@@ -328,12 +373,18 @@ function StudioContent() {
               <div className={styles.colDate}>{formatDate(date)}</div>
               <div className={styles.colLikes}>
                 <span className={styles.likeRatio}>
-                  👍 {v.likeCount ?? 0} / 👎 {v.dislikeCount ?? 0}
+                  Likes: 
                 </span>
+                <span className={styles.likeNumber}> {v.likeCount ?? 0}</span>
+                <br />
+                <span className={styles.dislikeRatio}>
+                  Dislikes: 
+                </span>
+                <span className={styles.dislikeNumber}> {v.dislikeCount ?? 0}</span>
               </div>
               <div className={styles.colComments}>
                 <Link href={`/watch?v=${v.filename}#comments`} className={styles.commentCount}>
-                  💬 {v.commentCount ?? 0}
+                  {v.commentCount ?? 0}
                 </Link>
               </div>
               <div className={styles.colActions}>
@@ -514,6 +565,9 @@ function StudioContent() {
             </div>
           )}
         </div>
+        {thumbnailError && (
+          <p className={styles.thumbnailError}>{thumbnailError}</p>
+        )}
       </>
     );
   }

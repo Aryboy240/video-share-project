@@ -11,6 +11,8 @@
 
 .videoContainer {
   width: 100%;
+  max-width: 100%;
+  aspect-ratio: 16 / 9;
   background-color: #000;
   border-radius: 8px;
   overflow: hidden;
@@ -27,8 +29,10 @@
 
 .videoPlayer {
   width: 100%;
+  height: 100%;
   display: block;
-  max-width: 100%;
+  object-fit: contain;
+  background: #000;
   cursor: pointer;
 }
 
@@ -53,12 +57,7 @@
   padding: 16px;
 }
 
-.videoTitle {
-  font-size: 22px;
-  font-weight: 600;
-  margin: 0 0 10px 0;
-  color: #ffffff;
-}
+
 
 .uploader {
   margin: 0 0 10px 0;
@@ -112,11 +111,28 @@
   background-color: rgba(26, 200, 232, 0.1);
 }
 
-.likeRow {
+.videoTitle {
+  position: relative;
+  float: left;
+  font-size: 22px;
+  font-weight: 600;
+  margin: 0 0 10px 0;
+  color: #ffffff;
+}
+
+.titleContainer{
   display: flex;
-  gap: 8px;
-  margin-bottom: 15px;
-  justify-content: flex-end;
+}
+
+.likeRow {
+  position: relative;
+  float: right;
+  margin-left: auto;
+  margin-right: 0;
+}
+
+.likeButton{
+  margin-right: 10px;
 }
 
 .likeButton {
@@ -188,7 +204,22 @@
 .channelRow {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 12px;
+}
+
+.channelLeft {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.channelActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 .avatar {
@@ -200,6 +231,14 @@
   align-items: center;
   justify-content: center;
   overflow: hidden;
+  flex-shrink: 0;
+}
+
+.avatarImg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 50%;
 }
 
 .avatarInitials {
@@ -209,13 +248,19 @@
 }
 
 .channelInfo {
-  flex-grow: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .channelName {
   margin: 0;
   font-weight: 500;
   color: #ffffff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .subscribeButton {

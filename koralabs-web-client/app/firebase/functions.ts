@@ -16,6 +16,9 @@ const toggleSubscriptionFunction = httpsCallable(functions, 'toggleSubscription'
 const getSubscriptionStatusFunction = httpsCallable(functions, 'getSubscriptionStatus');
 const recordViewFunction = httpsCallable(functions, 'recordView');
 const editCommentFunction = httpsCallable(functions, 'editComment');
+const checkAdminStatusFunction = httpsCallable(functions, 'checkAdminStatus');
+const adminGetAllVideosFunction = httpsCallable(functions, 'adminGetAllVideos');
+const adminDeleteVideoFunction = httpsCallable(functions, 'adminDeleteVideo');
 
 export async function uploadVideo(
   file: File,
@@ -178,5 +181,20 @@ export async function editComment(
   text: string,
 ): Promise<{ success: boolean }> {
   const response: any = await editCommentFunction({ videoId, commentId, text });
+  return response.data as { success: boolean };
+}
+
+export async function checkAdminStatus(): Promise<{ isAdmin: boolean }> {
+  const response: any = await checkAdminStatusFunction();
+  return response.data as { isAdmin: boolean };
+}
+
+export async function adminGetAllVideos(): Promise<Video[]> {
+  const response: any = await adminGetAllVideosFunction();
+  return response.data as Video[];
+}
+
+export async function adminDeleteVideo(videoId: string): Promise<{ success: boolean }> {
+  const response: any = await adminDeleteVideoFunction({ videoId });
   return response.data as { success: boolean };
 }

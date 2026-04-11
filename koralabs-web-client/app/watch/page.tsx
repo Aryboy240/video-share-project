@@ -53,6 +53,36 @@ function formatTime(s: number): string {
   return `${m}:${String(sec).padStart(2, '0')}`;
 }
 
+// ── Bandwidth / auto-quality helpers ─────────────────────────────────────────
+
+async function estimateBandwidthMbps(testUrl: string): Promise<number> {
+  // Primary: Network Information API
+  const conn = (navigator as any).connection;
+  if (typeof conn?.downlink === 'number' && conn.downlink > 0) return conn.downlink;
+  // Fallback: time a 100 KB range fetch
+  try {
+    const start = performance.now();
+    const resp = await fetch(testUrl, {
+      headers: { Range: 'bytes=0-102399' },
+      cache: 'no-store',
+    });
+    const blob = await resp.blob();
+    const elapsed = (performance.now() - start) / 1000;
+    if (elapsed <= 0 || blob.size === 0) return 1;
+    return (blob.size * 8) / (elapsed * 1_000_000);
+  } catch {
+    return 1; // ~1 Mbps → 480p safe default
+  }
+}
+
+function pickResolution(mbps: number, resolutions: string[]): string {
+  // resolutions are highest-first (e.g. ["1080p","720p","480p","360p"])
+  if (mbps >= 5) return resolutions[0];
+  if (mbps >= 2) return resolutions.includes('720p') ? '720p' : resolutions[0];
+  if (mbps >= 0.8) return resolutions.includes('480p') ? '480p' : resolutions[resolutions.length - 1];
+  return resolutions.includes('360p') ? '360p' : resolutions[resolutions.length - 1];
+}
+
 // ── SVG Icons ─────────────────────────────────────────────────────────────────
 
 function IconPlay() {
@@ -132,6 +162,8 @@ function WatchContent() {
   const [selectedResolution, setSelectedResolution] = useState<string | null>(null);
   const [viewCount, setViewCount] = useState<number | null>(null);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [isAutoResolution, setIsAutoResolution] = useState(true);
+  const [autoResLabel, setAutoResLabel] = useState('');
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [editCommentText, setEditCommentText] = useState('');
   const [savingCommentId, setSavingCommentId] = useState<string | null>(null);
@@ -148,6 +180,9 @@ function WatchContent() {
   const isDraggingRef = useRef(false);
   const pausedRef = useRef(true);
   const restoreTimeRef = useRef<{ time: number; playing: boolean } | null>(null);
+  const isAutoRef = useRef(true);
+  const autoIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const selectedResolutionRef = useRef<string | null>(null);
 
   // Player state
   const [paused, setPaused] = useState(true);
@@ -178,10 +213,44 @@ function WatchContent() {
     });
   }, [videoSrc]);
 
+  // Keep refs in sync
+  useEffect(() => { isAutoRef.current = isAutoResolution; }, [isAutoResolution]);
+  useEffect(() => { selectedResolutionRef.current = selectedResolution; }, [selectedResolution]);
+
+  // Auto-resolution: start/stop bandwidth polling based on isAutoResolution + resolutions
   useEffect(() => {
-    if (!video?.resolutions || video.resolutions.length === 0) { setSelectedResolution(null); return; }
-    setSelectedResolution(video.resolutions[0]);
-  }, [video?.resolutions]);
+    const resolutions = video?.resolutions;
+    if (!resolutions || resolutions.length === 0) {
+      setSelectedResolution(null);
+      setAutoResLabel('');
+      if (autoIntervalRef.current) { clearInterval(autoIntervalRef.current); autoIntervalRef.current = null; }
+      return;
+    }
+    if (!isAutoResolution) {
+      if (autoIntervalRef.current) { clearInterval(autoIntervalRef.current); autoIntervalRef.current = null; }
+      return;
+    }
+
+    const testUrl = `${videoPrefix}${videoSrc}`;
+    const check = async () => {
+      const mbps = await estimateBandwidthMbps(testUrl);
+      if (!isAutoRef.current) return;
+      const picked = pickResolution(mbps, resolutions);
+      setAutoResLabel(picked);
+      if (selectedResolutionRef.current !== picked) {
+        const v = videoRef.current;
+        restoreTimeRef.current = { time: v?.currentTime ?? 0, playing: !(v?.paused ?? true) };
+      }
+      setSelectedResolution(picked);
+    };
+
+    check();
+    autoIntervalRef.current = setInterval(check, 10_000);
+    return () => {
+      if (autoIntervalRef.current) { clearInterval(autoIntervalRef.current); autoIntervalRef.current = null; }
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAutoResolution, video?.resolutions]);
 
   useEffect(() => {
     if (!video?.uid) { setUploader(null); return; }
@@ -340,7 +409,15 @@ function WatchContent() {
   const handleResolutionChange = useCallback((res: string) => {
     const v = videoRef.current;
     restoreTimeRef.current = { time: v?.currentTime ?? 0, playing: !(v?.paused ?? true) };
+    setIsAutoResolution(false);
+    isAutoRef.current = false;
     setSelectedResolution(res);
+    setSettingsOpen(false);
+  }, []);
+
+  const handleAutoResolution = useCallback(() => {
+    setIsAutoResolution(true);
+    isAutoRef.current = true;
     setSettingsOpen(false);
   }, []);
 
@@ -625,11 +702,18 @@ function WatchContent() {
                         <div className={styles.settingsSection}>
                           <div className={styles.settingsSectionLabel}>Quality</div>
                           <div className={styles.settingsOptions}>
+                            <button
+                              type="button"
+                              className={`${styles.settingsOptionBtn}${isAutoResolution ? ' ' + styles.settingsOptionActive : ''}`}
+                              onClick={handleAutoResolution}
+                            >
+                              {isAutoResolution && autoResLabel ? `Auto (${autoResLabel})` : 'Auto'}
+                            </button>
                             {video.resolutions.map((res) => (
                               <button
                                 key={res}
                                 type="button"
-                                className={`${styles.settingsOptionBtn}${selectedResolution === res ? ' ' + styles.settingsOptionActive : ''}`}
+                                className={`${styles.settingsOptionBtn}${!isAutoResolution && selectedResolution === res ? ' ' + styles.settingsOptionActive : ''}`}
                                 onClick={() => handleResolutionChange(res)}
                               >
                                 {res}
@@ -655,56 +739,80 @@ function WatchContent() {
       <div className={styles.contentRow}>
         <div className={styles.mainColumn}>
           <div className={styles.videoInfoSection}>
-            <h1 className={styles.videoTitle}>{title}</h1>
-            <p className={styles.uploader}>Uploader: {uploaderLabel}</p>
+
+            
+            
+            <div className={styles.titleContainer}>
+
+              <h1 className={styles.videoTitle}>{title}</h1>
+              
+              <div className={styles.likeRow}>
+                <button
+                  type="button"
+                  className={`${styles.likeButton} ${likeAction === 'like' ? styles.likeButtonActive : ''}`}
+                  onClick={() => handleToggleLike('like')}
+                  disabled={!currentUser || togglingLike}
+                  title={currentUser ? 'Like' : 'Sign in to like'}
+                >👍 {likeCount}</button>
+                <button
+                  type="button"
+                  className={`${styles.likeButton} ${likeAction === 'dislike' ? styles.dislikeButtonActive : ''}`}
+                  onClick={() => handleToggleLike('dislike')}
+                  disabled={!currentUser || togglingLike}
+                  title={currentUser ? 'Dislike' : 'Sign in to dislike'}
+                >👎 {dislikeCount}</button>
+              </div>
+
+            </div>
+
             <div className={styles.metadataRow}>
               {viewCount !== null && (
                 <span className={styles.viewCount}>{viewCount} {viewCount === 1 ? 'view' : 'views'}</span>
               )}
+              <span>•</span>
               {video?.id && (
                 <span className={styles.uploadDate}>Uploaded {formatUploadDate(parseUploadDate(video.id))}</span>
               )}
             </div>
-
-            <div className={styles.likeRow}>
-              <button
-                type="button"
-                className={`${styles.likeButton} ${likeAction === 'like' ? styles.likeButtonActive : ''}`}
-                onClick={() => handleToggleLike('like')}
-                disabled={!currentUser || togglingLike}
-                title={currentUser ? 'Like' : 'Sign in to like'}
-              >👍 {likeCount}</button>
-              <button
-                type="button"
-                className={`${styles.likeButton} ${likeAction === 'dislike' ? styles.dislikeButtonActive : ''}`}
-                onClick={() => handleToggleLike('dislike')}
-                disabled={!currentUser || togglingLike}
-                title={currentUser ? 'Dislike' : 'Sign in to dislike'}
-              >👎 {dislikeCount}</button>
-            </div>
+            
 
             {description && <p className={styles.description}>{description}</p>}
             <div className={styles.divider} />
 
             <div className={styles.channelRow}>
-              <div className={styles.avatar}><span className={styles.avatarInitials}>KL</span></div>
-              <div className={styles.channelInfo}><h3 className={styles.channelName}>KoraLabs Video</h3></div>
-              {isOwner && (
-                <Link href={`/studio?edit=${video?.id}`} className={styles.editButton}>Edit video</Link>
-              )}
-              {canSubscribe && (
-                <button
-                  type="button"
-                  className={subscribed ? styles.unsubscribeButton : styles.subscribeButton}
-                  onClick={handleToggleSubscription}
-                  disabled={togglingSub}
-                >
-                  {subscribed ? 'Unsubscribe' : 'Subscribe'}
-                </button>
-              )}
-              <span className={styles.subscriberCount}>
-                {subscriberCount} {subscriberCount === 1 ? 'subscriber' : 'subscribers'}
-              </span>
+              <div className={styles.channelLeft}>
+                <div className={styles.avatar}>
+                  {uploader?.photoUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={uploader.photoUrl} alt={uploaderLabel} className={styles.avatarImg} />
+                  ) : (
+                    <span className={styles.avatarInitials}>
+                      {uploaderLabel.slice(0, 1).toUpperCase()}
+                    </span>
+                  )}
+                </div>
+                <div className={styles.channelInfo}>
+                  <h3 className={styles.channelName}>{uploaderLabel}</h3>
+                  <span className={styles.subscriberCount}>
+                    {subscriberCount} {subscriberCount === 1 ? 'subscriber' : 'subscribers'}
+                  </span>
+                </div>
+              </div>
+              <div className={styles.channelActions}>
+                {isOwner && (
+                  <Link href={`/studio?edit=${video?.id}`} className={styles.editButton}>Edit video</Link>
+                )}
+                {canSubscribe && (
+                  <button
+                    type="button"
+                    className={subscribed ? styles.unsubscribeButton : styles.subscribeButton}
+                    onClick={handleToggleSubscription}
+                    disabled={togglingSub}
+                  >
+                    {subscribed ? 'Unsubscribe' : 'Subscribe'}
+                  </button>
+                )}
+              </div>
             </div>
           </div>
 
