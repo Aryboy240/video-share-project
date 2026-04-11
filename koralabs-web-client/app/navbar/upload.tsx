@@ -1,35 +1,122 @@
 'use client';
 
-import {Fragment} from "react";
+import {Fragment, useRef, useState} from "react";
 import {uploadVideo} from "../firebase/functions";
 
 import styles from "./upload.module.css";
 
 export default function Upload() {
+  const [file, setFile] = useState<File | null>(null);
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.item(0);
-    if (file) {
-      handleUpload(file);
+    const picked = event.target.files?.item(0) ?? null;
+    if (picked) {
+      setFile(picked);
+      setTitle("");
+      setDescription("");
     }
   };
 
-  const handleUpload = async (file: File) => {
+  const closeModal = () => {
+    setFile(null);
+    setTitle("");
+    setDescription("");
+    if (inputRef.current) {
+      inputRef.current.value = "";
+    }
+  };
+
+  const canSubmit = !!file && title.trim().length > 0 && !uploading;
+
+  const handleSubmit = async () => {
+    if (!file || !title.trim()) return;
+    setUploading(true);
     try {
-      const response = await uploadVideo(file);
+      const response = await uploadVideo(file, title.trim(), description.trim());
       alert(`File uploaded successfully. Server responded with: ${JSON.stringify(response)}`);
+      closeModal();
     } catch (error) {
       alert(`Failed to upload file: ${error}`);
+    } finally {
+      setUploading(false);
     }
   };
 
   return (
     <Fragment>
-      <input id="upload" className={styles.uploadInput} type="file" accept="video/*" onChange={handleFileChange} />
+      <input
+        id="upload"
+        ref={inputRef}
+        className={styles.uploadInput}
+        type="file"
+        accept="video/*"
+        onChange={handleFileChange}
+      />
       <label htmlFor="upload" className={styles.uploadButton}>
         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="size-6">
           <path strokeLinecap="round" strokeLinejoin="round" d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25h-9A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z" />
         </svg>
       </label>
+
+      {file && (
+        <div className={styles.modalOverlay} onClick={closeModal}>
+          <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
+            <h2 className={styles.modalTitle}>Upload video</h2>
+            <p className={styles.modalFilename}>{file.name}</p>
+
+            <label className={styles.fieldLabel} htmlFor="video-title">
+              Title <span className={styles.required}>*</span>
+            </label>
+            <input
+              id="video-title"
+              className={styles.fieldInput}
+              type="text"
+              value={title}
+              maxLength={100}
+              placeholder="Give your video a title"
+              onChange={(e) => setTitle(e.target.value)}
+            />
+            <div className={styles.charCount}>{title.length}/100</div>
+
+            <label className={styles.fieldLabel} htmlFor="video-description">
+              Description
+            </label>
+            <textarea
+              id="video-description"
+              className={styles.fieldTextarea}
+              value={description}
+              maxLength={500}
+              placeholder="Tell viewers about your video (optional)"
+              onChange={(e) => setDescription(e.target.value)}
+              rows={4}
+            />
+            <div className={styles.charCount}>{description.length}/500</div>
+
+            <div className={styles.modalActions}>
+              <button
+                type="button"
+                className={styles.cancelButton}
+                onClick={closeModal}
+                disabled={uploading}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className={styles.submitButton}
+                onClick={handleSubmit}
+                disabled={!canSubmit}
+              >
+                {uploading ? "Uploading…" : "Upload"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </Fragment>
   );
 }

@@ -1,12 +1,25 @@
 'use client';
 
 import { useSearchParams } from 'next/navigation';
-import { Suspense } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import styles from './page.module.css';
+import { getVideos, Video } from '../firebase/functions';
 
 function WatchContent() {
   const videoPrefix = 'https://storage.googleapis.com/koralabs-processed-videos/';
   const videoSrc = useSearchParams().get('v');
+  const [video, setVideo] = useState<Video | null>(null);
+
+  useEffect(() => {
+    if (!videoSrc) return;
+    getVideos().then((videos) => {
+      const match = videos.find((v) => v.filename === videoSrc);
+      setVideo(match ?? null);
+    });
+  }, [videoSrc]);
+
+  const title = video?.title && video.title.length > 0 ? video.title : 'Untitled';
+  const description = video?.description && video.description.length > 0 ? video.description : null;
 
   return (
     <div className={styles.watchPage}>
@@ -17,12 +30,16 @@ function WatchContent() {
       <div className={styles.contentRow}>
         <div className={styles.mainColumn}>
           <div className={styles.videoInfoSection}>
-            <h1 className={styles.videoTitle}>Video Title</h1>
+            <h1 className={styles.videoTitle}>{title}</h1>
 
             <div className={styles.metadataRow}>
               <span className={styles.viewCount}>240 views</span>
               <span className={styles.uploadDate}>Uploaded 1 April 2026</span>
             </div>
+
+            {description && (
+              <p className={styles.description}>{description}</p>
+            )}
 
             <div className={styles.divider}></div>
 

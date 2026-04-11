@@ -23,7 +23,10 @@ export default async function Home() {
                   />
                 </div>
                 <div className={styles.cardContent}>
-                  <h3 className={styles.videoTitle}>{video.title || 'Untitled Video'}</h3>
+                  <h3 className={styles.videoTitle}>{video.title && video.title.length > 0 ? video.title : 'Untitled'}</h3>
+                  {video.description && video.description.length > 0 && (
+                    <p className={styles.description}>{video.description}</p>
+                  )}
                   <p className={styles.uploader}>Uploader: {video.uid || 'Unknown'}</p>
                   <div className={styles.statusContainer}>
                     <span className={`${styles.statusBadge} ${video.status === 'processing' ? styles.processing : styles.processed}`}>

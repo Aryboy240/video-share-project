@@ -4,9 +4,11 @@ import { functions } from './firebase';
 const generateUploadUrlFunction = httpsCallable(functions, 'generateUploadUrl');
 const getVideosFunction = httpsCallable(functions, 'getVideos');
 
-export async function uploadVideo(file: File) {
+export async function uploadVideo(file: File, title: string, description: string) {
   const response: any = await generateUploadUrlFunction({
-    fileExtension: file.name.split('.').pop()
+    fileExtension: file.name.split('.').pop(),
+    title,
+    description,
   });
 
   // Upload the file to the signed URL

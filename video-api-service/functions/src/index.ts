@@ -25,6 +25,8 @@ export const createUser = functions
     return;
   });
 
+const videoCollectionId = "videos";
+
 export const generateUploadUrl = onCall(
   {maxInstances: 1, region: "europe-west2"},
   async (request) => {
@@ -37,9 +39,47 @@ export const generateUploadUrl = onCall(
 
     const auth = request.auth;
     const data = request.data;
+
+    const rawTitle = typeof data.title === "string" ? data.title.trim() : "";
+    const rawDescription =
+      typeof data.description === "string" ? data.description.trim() : "";
+
+    if (!rawTitle) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "A video title is required."
+      );
+    }
+    if (rawTitle.length > 100) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "Title must be 100 characters or fewer."
+      );
+    }
+    if (rawDescription.length > 500) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "Description must be 500 characters or fewer."
+      );
+    }
+
     const bucket = storage.bucket(rawVideoBucketName);
 
     const fileName = `${auth.uid}-${Date.now()}.${data.fileExtension}`;
+    const videoId = fileName.split(".")[0];
+
+    await firestore
+      .collection(videoCollectionId)
+      .doc(videoId)
+      .set(
+        {
+          id: videoId,
+          uid: auth.uid,
+          title: rawTitle,
+          description: rawDescription,
+        },
+        {merge: true}
+      );
 
     const [url] = await bucket.file(fileName).getSignedUrl({
       version: "v4",
@@ -50,8 +90,6 @@ export const generateUploadUrl = onCall(
     return {url, fileName};
   }
 );
-
-const videoCollectionId = "videos";
 
 export interface Video {
   id?: string,
