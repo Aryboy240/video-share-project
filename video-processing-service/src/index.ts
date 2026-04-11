@@ -1,11 +1,10 @@
 import express from 'express';
 
-import { 
-  uploadProcessedVideo,
+import {
   downloadRawVideo,
   deleteRawVideo,
-  deleteProcessedVideo,
-  convertVideo,
+  deleteRawVideoFromBucket,
+  transcodeAllResolutions,
   setupDirectories
 } from './storage';
 
@@ -34,11 +33,10 @@ app.post('/process-video', async (req, res) => {
   }
 
   const inputFileName = data.name; // Format of <UID>-<DATE>.<EXTENSION>
-  const outputFileName = `processed-${inputFileName}`;
   const videoId = inputFileName.split('.')[0]; // Extract the UID part as video ID
 
   if (!await isVideoNew(videoId)) {
-  return res.status(400).send('Bad Request: video is already being processed.');
+    return res.status(400).send('Bad Request: video is already being processed.');
   } else {
     await setVideo(videoId, {
       id: videoId,
@@ -50,29 +48,34 @@ app.post('/process-video', async (req, res) => {
   // Download the raw video from Cloud Storage
   await downloadRawVideo(inputFileName);
 
-  // Process the video into 360p
-  try { 
-    await convertVideo(inputFileName, outputFileName)
+  // Transcode into all applicable resolutions
+  let resolutions: string[];
+  try {
+    resolutions = await transcodeAllResolutions(inputFileName, videoId);
   } catch (err) {
-    await Promise.all([
-      deleteRawVideo(inputFileName),
-      deleteProcessedVideo(outputFileName)
-    ]);
+    await deleteRawVideo(inputFileName);
     return res.status(500).send('Processing failed');
   }
-  
-  // Upload the processed video to Cloud Storage
-  await uploadProcessedVideo(outputFileName);
 
+  // filename points to the highest available resolution for backwards compat
+  const filename = `${videoId}_${resolutions[0]}.mp4`;
   await setVideo(videoId, {
     status: 'processed',
-    filename: outputFileName,
+    filename,
+    resolutions,
   });
 
-  await Promise.all([
-    deleteRawVideo(inputFileName),
-    deleteProcessedVideo(outputFileName)
-  ]);
+  try {
+    await deleteRawVideoFromBucket(inputFileName);
+  } catch (err) {
+    console.error(
+      `Failed to delete raw video gs://koralabs-raw-videos/${inputFileName}. ` +
+      `Processing succeeded; continuing.`,
+      err
+    );
+  }
+
+  await deleteRawVideo(inputFileName);
 
   return res.status(200).send('Processing finished successfully');
 });

@@ -20,25 +20,88 @@ export function setupDirectories() {
 }
 
 
+const ALL_RESOLUTIONS = [
+  { label: '1080p', height: 1080 },
+  { label: '720p',  height: 720  },
+  { label: '480p',  height: 480  },
+  { label: '360p',  height: 360  },
+];
+
 /**
- * @param rawVideoName - The name of the file to convert from {@link localRawVideoPath}.
- * @param processedVideoName - The name of the file to convert to {@link localProcessedVideoPath}.
- * @returns A promise that resolves when the video has been converted.
+ * Probes the source video and returns its height in pixels.
  */
-export function convertVideo(rawVideoName: string, processedVideoName: string) {
-  return new Promise<void>((resolve, reject) => {
+function getVideoHeight(rawVideoName: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    ffmpeg.ffprobe(
+      `${localRawVideoPath}/${rawVideoName}`,
+      (err, metadata) => {
+        if (err) return reject(err);
+        const stream = metadata.streams.find(
+          (s) => s.codec_type === 'video'
+        );
+        if (!stream?.height) {
+          return reject(new Error('Could not determine video height'));
+        }
+        resolve(stream.height);
+      }
+    );
+  });
+}
+
+/**
+ * Transcodes a raw video to the given height, preserving aspect ratio.
+ */
+function convertVideoToResolution(
+  rawVideoName: string,
+  outputName: string,
+  height: number,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
     ffmpeg(`${localRawVideoPath}/${rawVideoName}`)
-      .outputOptions("-vf", "scale=-1:360") // 360p
-      .on("end", function () {
-        console.log("Processing finished successfully");
+      .outputOptions('-vf', `scale=-2:${height}`)
+      .outputOptions('-c:v', 'libx264')
+      .outputOptions('-crf', '23')
+      .outputOptions('-preset', 'fast')
+      .outputOptions('-c:a', 'aac')
+      .on('end', () => {
+        console.log(`Transcoded ${outputName} successfully`);
         resolve();
       })
-      .on("error", function (err: any) {
-        console.log("An error occurred: " + err.message);
+      .on('error', (err: any) => {
+        console.error(`Transcode error for ${outputName}: ${err.message}`);
         reject(err);
       })
-      .save(`${localProcessedVideoPath}/${processedVideoName}`);
+      .save(`${localProcessedVideoPath}/${outputName}`);
   });
+}
+
+/**
+ * Transcodes the raw video into all applicable resolutions, uploads each
+ * to Cloud Storage, and cleans up local output files. 360p is always
+ * included; higher resolutions are skipped if the source is shorter.
+ * @returns Array of resolution labels generated, highest first
+ *          (e.g. ['1080p', '720p', '360p']).
+ */
+export async function transcodeAllResolutions(
+  rawVideoName: string,
+  videoId: string,
+): Promise<string[]> {
+  const sourceHeight = await getVideoHeight(rawVideoName);
+  console.log(`Source video height: ${sourceHeight}px`);
+
+  const toProcess = ALL_RESOLUTIONS.filter(
+    ({ height, label }) => height <= sourceHeight || label === '360p'
+  );
+
+  const generated: string[] = [];
+  for (const { label, height } of toProcess) {
+    const outputName = `${videoId}_${label}.mp4`;
+    await convertVideoToResolution(rawVideoName, outputName, height);
+    await uploadProcessedVideo(outputName);
+    await deleteProcessedVideo(outputName);
+    generated.push(label);
+  }
+  return generated;
 }
 
 
@@ -72,6 +135,9 @@ export async function uploadProcessedVideo(fileName: string) {
   await storage.bucket(processedVideoBucketName)
     .upload(`${localProcessedVideoPath}/${fileName}`, {
       destination: fileName,
+      metadata: {
+        cacheControl: "public, max-age=31536000, immutable",
+      },
     });
   console.log(
     `${localProcessedVideoPath}/${fileName} uploaded to gs://${processedVideoBucketName}/${fileName}.`
@@ -86,10 +152,23 @@ export async function uploadProcessedVideo(fileName: string) {
  * @param fileName - The name of the file to delete from the
  * {@link localRawVideoPath} folder.
  * @returns A promise that resolves when the file has been deleted.
- * 
+ *
  */
 export function deleteRawVideo(fileName: string) {
   return deleteFile(`${localRawVideoPath}/${fileName}`);
+}
+
+
+/**
+ * @param fileName - The name of the file to delete from the
+ * {@link rawVideoBucketName} bucket in Cloud Storage.
+ * @returns A promise that resolves when the file has been deleted.
+ */
+export async function deleteRawVideoFromBucket(fileName: string) {
+  await storage.bucket(rawVideoBucketName).file(fileName).delete();
+  console.log(
+    `gs://${rawVideoBucketName}/${fileName} deleted from Cloud Storage.`
+  );
 }
 
 

@@ -1,0 +1,546 @@
+.studioPage {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 24px;
+  color: #ffffff;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.loading {
+  color: #aaa;
+  font-size: 14px;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #2a2a2a;
+}
+
+.heading {
+  font-size: 24px;
+  font-weight: 600;
+  margin: 0;
+  color: #ffffff;
+}
+
+.uploadCta {
+  background-color: transparent;
+  border: 1px solid var(--primary-accent);
+  color: var(--primary-accent);
+  padding: 10px 20px;
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.uploadCta:hover {
+  background-color: var(--primary-accent);
+  color: #000;
+  box-shadow: 0 0 12px var(--highlight-glow);
+}
+
+.tableWrap {
+  background-color: #1a1a1a;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid #2a2a2a;
+}
+
+.tableHeader {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 140px 140px 120px 90px 180px;
+  gap: 16px;
+  align-items: center;
+  padding: 14px 20px;
+  background-color: #121212;
+  font-size: 12px;
+  font-weight: 600;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid #2a2a2a;
+}
+
+.tableRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 140px 140px 120px 90px 180px;
+  gap: 16px;
+  align-items: center;
+  padding: 14px 20px;
+  border-bottom: 1px solid #222;
+  transition: background-color 0.2s ease;
+}
+
+.tableRow:hover {
+  background-color: #1f1f1f;
+}
+
+.tableRow:last-child {
+  border-bottom: none;
+}
+
+.colVideo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.thumbnailLink {
+  display: block;
+  flex-shrink: 0;
+  line-height: 0;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.rowThumbnail {
+  width: 120px;
+  height: 68px;
+  object-fit: cover;
+  border-radius: 4px;
+  background-color: #0f0f0f;
+  flex-shrink: 0;
+  border: 1px solid #333;
+  transition: opacity 0.2s ease;
+}
+
+.thumbnailLink:hover .rowThumbnail {
+  opacity: 0.8;
+}
+
+.rowTitleBlock {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.rowTitle {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+  color: #ffffff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rowDescription {
+  margin: 0;
+  font-size: 12px;
+  color: #888;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.colStatus,
+.colDate,
+.colLikes,
+.colComments {
+  font-size: 13px;
+  color: #ccc;
+}
+
+.likeRatio,
+.commentCount {
+  font-size: 12px;
+  color: #888;
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+.commentCount:hover {
+  color: var(--primary-accent);
+}
+
+.colActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.editButton {
+  background-color: transparent;
+  border: 1px solid #555;
+  color: #ccc;
+  padding: 6px 14px;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.editButton:hover {
+  background-color: #2a2a2a;
+  border-color: #777;
+  color: #fff;
+}
+
+.statusBadge {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.statusProcessing {
+  background-color: rgba(255, 152, 0, 0.15);
+  color: #ff9800;
+  border: 1px solid rgba(255, 152, 0, 0.3);
+}
+
+.statusProcessed {
+  background-color: rgba(76, 175, 80, 0.15);
+  color: #4caf50;
+  border: 1px solid rgba(76, 175, 80, 0.3);
+}
+
+.deleteButton {
+  background-color: transparent;
+  border: 1px solid #ff5c5c;
+  color: #ff5c5c;
+  padding: 6px 14px;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.deleteButton:hover:not(:disabled) {
+  background-color: #ff5c5c;
+  color: #fff;
+  box-shadow: 0 0 10px rgba(255, 92, 92, 0.4);
+}
+
+.deleteButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.emptyRow {
+  padding: 40px 20px;
+  text-align: center;
+  color: #888;
+  font-size: 14px;
+}
+
+/* Modal */
+.modalOverlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.75);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 20px;
+}
+
+.modal {
+  background-color: #1a1a1a;
+  border-radius: 8px;
+  padding: 24px;
+  width: 100%;
+  max-width: 560px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6), 0 0 20px rgba(26, 200, 232, 0.15);
+  color: #ffffff;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.modalTitle {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.modalSubtitle {
+  margin: 0 0 16px 0;
+  font-size: 13px;
+  color: #aaa;
+}
+
+.modalFilename {
+  margin: 0 0 12px 0;
+  font-size: 13px;
+  color: #aaa;
+  word-break: break-all;
+}
+
+.dropZone {
+  border: 2px dashed #444;
+  border-radius: 8px;
+  padding: 48px 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  background-color: #0f0f0f;
+  transition: all 0.2s ease;
+}
+
+.dropZoneActive {
+  border-color: var(--primary-accent);
+  background-color: rgba(26, 200, 232, 0.05);
+  box-shadow: 0 0 20px rgba(26, 200, 232, 0.2);
+}
+
+.dropZoneIcon {
+  width: 64px;
+  height: 64px;
+  color: #666;
+  margin-bottom: 8px;
+}
+
+.dropZoneIcon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.dropZoneText {
+  margin: 0;
+  font-size: 15px;
+  color: #ccc;
+  font-weight: 500;
+}
+
+.dropZoneHint {
+  margin: 0;
+  font-size: 12px;
+  color: #666;
+}
+
+.selectFilesButton {
+  display: inline-block;
+  margin-top: 8px;
+  padding: 10px 24px;
+  border-radius: 6px;
+  background-color: transparent;
+  border: 1px solid var(--primary-accent);
+  color: var(--primary-accent);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.selectFilesButton:hover {
+  background-color: var(--primary-accent);
+  color: #000;
+  box-shadow: 0 0 12px var(--highlight-glow);
+}
+
+.hiddenInput {
+  display: none;
+}
+
+.fieldLabel {
+  display: block;
+  margin-top: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #ccc;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.required {
+  color: var(--primary-accent);
+}
+
+.fieldInput,
+.fieldTextarea {
+  width: 100%;
+  background-color: #0f0f0f;
+  border: 1px solid #333;
+  border-radius: 6px;
+  color: #ffffff;
+  font-family: inherit;
+  font-size: 14px;
+  padding: 10px 12px;
+  margin-top: 6px;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  resize: vertical;
+}
+
+.fieldInput:focus,
+.fieldTextarea:focus {
+  outline: none;
+  border-color: var(--primary-accent);
+  box-shadow: 0 0 0 3px rgba(26, 200, 232, 0.2);
+}
+
+.fieldInput::placeholder,
+.fieldTextarea::placeholder {
+  color: #666;
+}
+
+.charCount {
+  text-align: right;
+  font-size: 11px;
+  color: #777;
+  margin-top: 4px;
+}
+
+.thumbnailRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.thumbnailPickButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 14px;
+  border-radius: 6px;
+  background-color: transparent;
+  border: 1px solid #444;
+  color: #ccc;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.thumbnailPickButton:hover {
+  border-color: var(--primary-accent);
+  color: var(--primary-accent);
+  box-shadow: 0 0 8px rgba(26, 200, 232, 0.25);
+}
+
+.thumbnailPickButtonDisabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.thumbnailPreviewWrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.thumbnailPreview {
+  width: 96px;
+  height: 54px;
+  object-fit: cover;
+  border-radius: 4px;
+  border: 1px solid #333;
+  background-color: #0f0f0f;
+  display: block;
+}
+
+.thumbnailRemove {
+  background-color: transparent;
+  border: 1px solid #444;
+  color: #aaa;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.thumbnailRemove:hover:not(:disabled) {
+  border-color: #ff6b6b;
+  color: #ff6b6b;
+}
+
+.thumbnailRemove:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.modalActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.cancelButton,
+.publishButton {
+  padding: 8px 20px;
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.cancelButton {
+  background-color: transparent;
+  border: 1px solid #444;
+  color: #ccc;
+}
+
+.cancelButton:hover:not(:disabled) {
+  background-color: #2a2a2a;
+  border-color: #666;
+}
+
+.publishButton {
+  background-color: transparent;
+  border: 1px solid var(--primary-accent);
+  color: var(--primary-accent);
+}
+
+.publishButton:hover:not(:disabled) {
+  background-color: var(--primary-accent);
+  color: #000;
+  box-shadow: 0 0 12px var(--highlight-glow);
+}
+
+.publishButton:disabled,
+.cancelButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+@media (max-width: 768px) {
+  .tableHeader,
+  .tableRow {
+    grid-template-columns: minmax(0, 1fr) 100px 100px;
+  }
+  .colLikes,
+  .colComments,
+  .colActions {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+    padding-left: 112px;
+  }
+  .colActions {
+    gap: 6px;
+  }
+  .rowThumbnail {
+    width: 100px;
+    height: 56px;
+  }
+}
