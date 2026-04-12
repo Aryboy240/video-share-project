@@ -4,7 +4,7 @@ import {
   downloadRawVideo,
   deleteRawVideo,
   deleteRawVideoFromBucket,
-  transcodeAllResolutions,
+  transcodeToHLS,
   setupDirectories
 } from './storage';
 
@@ -48,21 +48,22 @@ app.post('/process-video', async (req, res) => {
   // Download the raw video from Cloud Storage
   await downloadRawVideo(inputFileName);
 
-  // Transcode into all applicable resolutions
-  let resolutions: string[];
+  // Transcode into HLS adaptive streams
+  let masterFilename: string;
   try {
-    resolutions = await transcodeAllResolutions(inputFileName, videoId);
+    masterFilename = await transcodeToHLS(inputFileName, videoId);
   } catch (err) {
     await deleteRawVideo(inputFileName);
     return res.status(500).send('Processing failed');
   }
 
-  // filename points to the highest available resolution for backwards compat
-  const filename = `${videoId}_${resolutions[0]}.mp4`;
+  const hlsMasterUrl =
+    `https://storage.googleapis.com/koralabs-processed-videos/${masterFilename}`;
   await setVideo(videoId, {
     status: 'processed',
-    filename,
-    resolutions,
+    filename: videoId,  // used as the watch URL param for HLS videos
+    hlsMasterUrl,
+    streamType: 'hls',
   });
 
   try {

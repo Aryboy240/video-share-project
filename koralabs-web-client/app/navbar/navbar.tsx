@@ -48,6 +48,14 @@ export default function Navbar() {
                 placeholder="Search videos…"
                 aria-label="Search videos"
             />
+            {query && (
+                <button
+                    type="button"
+                    className={styles.clearButton}
+                    aria-label="Clear search"
+                    onClick={() => { setQuery(''); router.push('/'); }}
+                >✕</button>
+            )}
             <button type="submit" className={styles.searchButton} aria-label="Search">
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
                     <circle cx="11" cy="11" r="8" />

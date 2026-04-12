@@ -1,6 +1,7 @@
 import * as functions from "firebase-functions/v1";
 import {initializeApp} from "firebase-admin/app";
 import {Firestore, FieldValue} from "firebase-admin/firestore";
+import {getAuth} from "firebase-admin/auth";
 import * as logger from "firebase-functions/logger";
 import {Storage} from "@google-cloud/storage";
 import {onCall} from "firebase-functions/v2/https";
@@ -23,6 +24,7 @@ export const createUser = functions
       uid: user.uid,
       email: user.email,
       photoUrl: user.photoURL,
+      displayName: user.displayName ?? user.email?.split("@")[0] ?? "User",
     };
     await firestore.collection("users").doc(user.uid).set(userInfo);
     logger.info(`User Created: ${JSON.stringify(userInfo)}`);
@@ -140,6 +142,8 @@ export interface Video {
   description?: string,
   thumbnailUrl?: string,
   resolutions?: string[],
+  hlsMasterUrl?: string,
+  streamType?: string,
 }
 
 export const getVideos = onCall(
@@ -149,6 +153,30 @@ export const getVideos = onCall(
       await firestore.collection(videoCollectionId).limit(10).get();
     return querySnapshot.docs.map((doc) => doc.data());
   });
+
+export const getVideoById = onCall(
+  {maxInstances: 1, region: "europe-west2"},
+  async (request) => {
+    const videoId = request.data?.videoId;
+    if (typeof videoId !== "string" || !videoId) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "A videoId is required."
+      );
+    }
+    // Try direct doc ID first (covers both legacy MP4 and HLS videos)
+    const byId = await firestore
+      .collection(videoCollectionId).doc(videoId).get();
+    if (byId.exists) return byId.data();
+    // Fall back: query by filename field
+    const snap = await firestore
+      .collection(videoCollectionId)
+      .where("filename", "==", videoId)
+      .limit(1)
+      .get();
+    return snap.empty ? null : snap.docs[0].data();
+  }
+);
 
 export const getUserVideos = onCall(
   {maxInstances: 1, region: "europe-west2"},
@@ -674,18 +702,18 @@ export const deleteVideo = onCall(
 
     const processedBucket = storage.bucket(processedVideoBucketName);
 
-    const resolutions = Array.isArray(video.resolutions) ?
-      video.resolutions as string[] :
-      [];
-
-    if (resolutions.length > 0) {
+    // Delete all processed files by prefix (HLS segments, playlists,
+    // and legacy multi-res MP4s all share the {videoId}_ prefix)
+    const [prefixFiles] = await processedBucket.getFiles(
+      {prefix: `${videoId}_`}
+    );
+    if (prefixFiles.length > 0) {
       await Promise.all(
-        resolutions.map(async (res: string) => {
-          const resFile = `${videoId}_${res}.mp4`;
+        prefixFiles.map(async (file) => {
           try {
-            await processedBucket.file(resFile).delete();
+            await file.delete();
           } catch (err) {
-            logger.warn(`Failed to delete ${resFile}`, err);
+            logger.warn(`Failed to delete ${file.name}`, err);
           }
         })
       );
@@ -707,10 +735,12 @@ export const deleteVideo = onCall(
       typeof video.thumbnailUrl === "string" &&
       video.thumbnailUrl.length > 0
     ) {
-      const prefix =
+      const thumbPrefix =
         `https://storage.googleapis.com/${processedVideoBucketName}/`;
-      if (video.thumbnailUrl.startsWith(prefix)) {
-        const thumbnailPath = video.thumbnailUrl.slice(prefix.length);
+      if (video.thumbnailUrl.startsWith(thumbPrefix)) {
+        const thumbnailPath = video.thumbnailUrl.slice(
+          thumbPrefix.length
+        );
         try {
           await processedBucket.file(thumbnailPath).delete();
         } catch (err) {
@@ -725,6 +755,37 @@ export const deleteVideo = onCall(
     await docRef.delete();
 
     return {success: true};
+  }
+);
+
+export const backfillUserDisplayNames = onCall(
+  {maxInstances: 1, region: "europe-west2"},
+  async (request) => {
+    if (!request.auth) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "Must be authenticated."
+      );
+    }
+    await requireAdmin(request.auth.uid);
+    const snap = await firestore.collection("users").get();
+    let updated = 0;
+    await Promise.all(snap.docs.map(async (doc) => {
+      const data = doc.data();
+      if (data.displayName) return;
+      try {
+        const authUser = await getAuth().getUser(doc.id);
+        const displayName =
+          authUser.displayName ??
+          authUser.email?.split("@")[0] ??
+          "User";
+        await doc.ref.set({displayName}, {merge: true});
+        updated++;
+      } catch (err) {
+        logger.warn(`backfill: could not update ${doc.id}`, err);
+      }
+    }));
+    return {updated};
   }
 );
 
@@ -799,17 +860,17 @@ export const adminDeleteVideo = onCall(
 
     const video = snapshot.data() ?? {};
     const processedBucket = storage.bucket(processedVideoBucketName);
-    const resolutions = Array.isArray(video.resolutions) ?
-      video.resolutions as string[] : [];
 
-    if (resolutions.length > 0) {
+    const [prefixFiles] = await processedBucket.getFiles(
+      {prefix: `${videoId}_`}
+    );
+    if (prefixFiles.length > 0) {
       await Promise.all(
-        resolutions.map(async (res: string) => {
-          const resFile = `${videoId}_${res}.mp4`;
+        prefixFiles.map(async (file) => {
           try {
-            await processedBucket.file(resFile).delete();
+            await file.delete();
           } catch (err) {
-            logger.warn(`Admin: failed to delete ${resFile}`, err);
+            logger.warn(`Admin: failed to delete ${file.name}`, err);
           }
         })
       );
@@ -827,10 +888,12 @@ export const adminDeleteVideo = onCall(
       typeof video.thumbnailUrl === "string" &&
       video.thumbnailUrl.length > 0
     ) {
-      const prefix =
+      const thumbPrefix =
         `https://storage.googleapis.com/${processedVideoBucketName}/`;
-      if (video.thumbnailUrl.startsWith(prefix)) {
-        const thumbnailPath = video.thumbnailUrl.slice(prefix.length);
+      if (video.thumbnailUrl.startsWith(thumbPrefix)) {
+        const thumbnailPath = video.thumbnailUrl.slice(
+          thumbPrefix.length
+        );
         try {
           await processedBucket.file(thumbnailPath).delete();
         } catch (err) {

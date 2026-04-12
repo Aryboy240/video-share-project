@@ -20,11 +20,11 @@ export function setupDirectories() {
 }
 
 
-const ALL_RESOLUTIONS = [
-  { label: '1080p', height: 1080 },
-  { label: '720p',  height: 720  },
-  { label: '480p',  height: 480  },
-  { label: '360p',  height: 360  },
+const HLS_VARIANTS = [
+  { label: '1080p', height: 1080, width: 1920, bandwidth: 5000000 },
+  { label: '720p',  height: 720,  width: 1280, bandwidth: 2800000 },
+  { label: '480p',  height: 480,  width: 854,  bandwidth: 1400000 },
+  { label: '360p',  height: 360,  width: 640,  bandwidth: 800000  },
 ];
 
 /**
@@ -49,13 +49,18 @@ function getVideoHeight(rawVideoName: string): Promise<number> {
 }
 
 /**
- * Transcodes a raw video to the given height, preserving aspect ratio.
+ * Transcodes a raw video to HLS segments for a single resolution.
  */
-function convertVideoToResolution(
+function transcodeResolutionToHLS(
   rawVideoName: string,
-  outputName: string,
+  videoId: string,
+  label: string,
   height: number,
 ): Promise<void> {
+  const segmentPattern =
+    `${localProcessedVideoPath}/${videoId}_${label}_%03d.ts`;
+  const outputPlaylist =
+    `${localProcessedVideoPath}/${videoId}_${label}.m3u8`;
   return new Promise((resolve, reject) => {
     ffmpeg(`${localRawVideoPath}/${rawVideoName}`)
       .outputOptions('-vf', `scale=-2:${height}`)
@@ -63,45 +68,92 @@ function convertVideoToResolution(
       .outputOptions('-crf', '23')
       .outputOptions('-preset', 'fast')
       .outputOptions('-c:a', 'aac')
+      .outputOptions('-hls_time', '6')
+      .outputOptions('-hls_playlist_type', 'vod')
+      .outputOptions('-hls_segment_filename', segmentPattern)
       .on('end', () => {
-        console.log(`Transcoded ${outputName} successfully`);
+        console.log(`HLS transcode for ${label} complete`);
         resolve();
       })
       .on('error', (err: any) => {
-        console.error(`Transcode error for ${outputName}: ${err.message}`);
+        console.error(`HLS transcode error for ${label}: ${err.message}`);
         reject(err);
       })
-      .save(`${localProcessedVideoPath}/${outputName}`);
+      .save(outputPlaylist);
   });
 }
 
 /**
- * Transcodes the raw video into all applicable resolutions, uploads each
- * to Cloud Storage, and cleans up local output files. 360p is always
- * included; higher resolutions are skipped if the source is shorter.
- * @returns Array of resolution labels generated, highest first
- *          (e.g. ['1080p', '720p', '360p']).
+ * Uploads an HLS file (.m3u8 or .ts) with the correct Content-Type.
  */
-export async function transcodeAllResolutions(
+async function uploadHlsFile(fileName: string): Promise<void> {
+  const ext = fileName.split('.').pop()?.toLowerCase();
+  const contentType =
+    ext === 'm3u8' ? 'application/x-mpegURL' : 'video/MP2T';
+
+  const bucket = storage.bucket(processedVideoBucketName);
+  await bucket.upload(`${localProcessedVideoPath}/${fileName}`, {
+    destination: fileName,
+    metadata: {
+      cacheControl: 'public, max-age=31536000, immutable',
+      contentType,
+    },
+  });
+  await bucket.file(fileName).makePublic();
+  console.log(`Uploaded ${fileName} (${contentType})`);
+}
+
+/**
+ * Transcodes the raw video into HLS adaptive streams, generates a
+ * master playlist, uploads everything to Cloud Storage, and cleans up.
+ * 360p is always included; higher resolutions are skipped if the source
+ * is shorter.
+ * @returns The master playlist filename, e.g. "{videoId}_master.m3u8".
+ */
+export async function transcodeToHLS(
   rawVideoName: string,
   videoId: string,
-): Promise<string[]> {
+): Promise<string> {
   const sourceHeight = await getVideoHeight(rawVideoName);
   console.log(`Source video height: ${sourceHeight}px`);
 
-  const toProcess = ALL_RESOLUTIONS.filter(
+  const toProcess = HLS_VARIANTS.filter(
     ({ height, label }) => height <= sourceHeight || label === '360p'
   );
 
-  const generated: string[] = [];
+  // Transcode each resolution to HLS segments + per-resolution playlist
   for (const { label, height } of toProcess) {
-    const outputName = `${videoId}_${label}.mp4`;
-    await convertVideoToResolution(rawVideoName, outputName, height);
-    await uploadProcessedVideo(outputName);
-    await deleteProcessedVideo(outputName);
-    generated.push(label);
+    await transcodeResolutionToHLS(rawVideoName, videoId, label, height);
   }
-  return generated;
+
+  // Generate master playlist referencing each variant stream
+  const masterFilename = `${videoId}_master.m3u8`;
+  let master = '#EXTM3U\n#EXT-X-VERSION:3\n';
+  for (const { label, width, height, bandwidth } of toProcess) {
+    master += `#EXT-X-STREAM-INF:BANDWIDTH=${bandwidth},`;
+    master += `RESOLUTION=${width}x${height}\n`;
+    master += `${videoId}_${label}.m3u8\n`;
+  }
+  fs.writeFileSync(
+    `${localProcessedVideoPath}/${masterFilename}`, master,
+  );
+
+  // Upload all generated HLS files (.m3u8 playlists + .ts segments)
+  const localFiles = fs.readdirSync(localProcessedVideoPath);
+  const hlsFiles = localFiles.filter(
+    (f) => f.startsWith(`${videoId}_`) &&
+           (f.endsWith('.m3u8') || f.endsWith('.ts'))
+  );
+  for (const file of hlsFiles) {
+    await uploadHlsFile(file);
+  }
+
+  // Clean up all local HLS files
+  for (const file of hlsFiles) {
+    await deleteProcessedVideo(file);
+  }
+
+  return masterFilename;
 }
 
 

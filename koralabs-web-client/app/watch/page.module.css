@@ -538,8 +538,8 @@
 }
 
 .commentAvatar {
-  width: 32px;
-  height: 32px;
+  width: 36px;
+  height: 36px;
   border-radius: 50%;
   background-color: #333;
   display: flex;
@@ -547,6 +547,14 @@
   justify-content: center;
   overflow: hidden;
   flex-shrink: 0;
+}
+
+.commentAvatarImg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  border-radius: 50%;
 }
 
 .commentHeader {
@@ -596,6 +604,8 @@
   border-radius: 4px;
   transition: all 0.3s ease;
   cursor: pointer;
+  text-decoration: none;
+  color: inherit;
 }
 
 .relatedVideoCard:hover {
@@ -609,6 +619,22 @@
   background-color: #333;
   border-radius: 4px;
   flex-shrink: 0;
+}
+
+.upNextThumb {
+  width: 120px;
+  height: 68px;
+  border-radius: 4px;
+  overflow: hidden;
+  flex-shrink: 0;
+  background-color: #333;
+}
+
+.upNextThumbImg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 
 .videoDetails {

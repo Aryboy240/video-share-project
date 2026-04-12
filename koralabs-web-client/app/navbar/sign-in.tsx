@@ -3,21 +3,44 @@
 import { signInWithGoogle, signOut } from "../firebase/firebase";
 import styles from "./sign-in.module.css"
 import { User } from "firebase/auth";
+import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 
 interface SignInProps {
     user: User | null;
 }
 
 export default function SignIn({ user }: SignInProps) {
+    const [open, setOpen] = useState(false);
+    const wrapRef = useRef<HTMLDivElement>(null);
+    const router = useRouter();
+
+    useEffect(() => {
+        if (!open) return;
+        const handler = (e: MouseEvent) => {
+            if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+                setOpen(false);
+            }
+        };
+        document.addEventListener('click', handler);
+        return () => document.removeEventListener('click', handler);
+    }, [open]);
+
     if (!user) {
         return (
             <button className={styles.signin} onClick={signInWithGoogle}>Sign In</button>
         );
     }
 
+    const initial = (user.displayName || user.email || 'U').slice(0, 1).toUpperCase();
+
     return (
-        <div className={styles.userBadge}>
-            <div className={styles.avatar}>
+        <div className={styles.dropdownWrap} ref={wrapRef}>
+            <button
+                className={styles.avatarBtn}
+                onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
+                aria-label="Account menu"
+            >
                 {user.photoURL ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
@@ -27,19 +50,26 @@ export default function SignIn({ user }: SignInProps) {
                         referrerPolicy="no-referrer"
                     />
                 ) : (
-                    <svg
-                        className={styles.avatarFallback}
-                        xmlns="http://www.w3.org/2000/svg"
-                        viewBox="0 0 24 24"
-                        fill="currentColor"
-                        aria-hidden="true"
-                    >
-                        <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
-                    </svg>
+                    <span className={styles.avatarInitial}>{initial}</span>
                 )}
-            </div>
-            {user.email && <span className={styles.email}>{user.email}</span>}
-            <button className={styles.signin} onClick={signOut}>Sign out</button>
+            </button>
+
+            {open && (
+                <div className={styles.dropdown}>
+                    <button
+                        className={styles.dropdownItem}
+                        onClick={() => { setOpen(false); router.push('/studio'); }}
+                    >
+                        Studio
+                    </button>
+                    <button
+                        className={styles.dropdownItem}
+                        onClick={() => { setOpen(false); signOut(); }}
+                    >
+                        Sign Out
+                    </button>
+                </div>
+            )}
         </div>
     );
 }

@@ -19,13 +19,13 @@
     border: 1px solid #666;
 }
 
-.userBadge {
-    display: flex;
+.dropdownWrap {
+    position: relative;
+    display: inline-flex;
     align-items: center;
-    gap: 12px;
 }
 
-.avatar {
+.avatarBtn {
     width: 36px;
     height: 36px;
     border-radius: 50%;
@@ -36,6 +36,14 @@
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
+    cursor: pointer;
+    padding: 0;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.avatarBtn:hover {
+    border-color: #888;
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.1);
 }
 
 .avatarImg {
@@ -45,23 +53,42 @@
     display: block;
 }
 
-.avatarFallback {
-    width: 22px;
-    height: 22px;
-    color: #aaa;
-}
-
-.email {
+.avatarInitial {
     color: #ccc;
-    font-size: 13px;
-    max-width: 220px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 1;
+    user-select: none;
 }
 
-@media (max-width: 640px) {
-    .email {
-        display: none;
-    }
+.dropdown {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    background-color: #1e1e1e;
+    border: 1px solid #333;
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+    min-width: 140px;
+    z-index: 200;
+    overflow: hidden;
+}
+
+.dropdownItem {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    color: #ccc;
+    font-family: inherit;
+    font-size: 14px;
+    padding: 10px 16px;
+    cursor: pointer;
+    transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.dropdownItem:hover {
+    background-color: #2a2a2a;
+    color: #ffffff;
 }

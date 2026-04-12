@@ -49,7 +49,7 @@ function VideoCard({ video, userMap }: { video: Video; userMap: Map<string, User
       : '/images/thumbnails/thumbnail.png';
 
   return (
-    <Link href={`/watch?v=${video.filename}`} key={video.id} className={styles.cardLink}>
+    <Link href={`/watch?v=${video.filename ?? video.id}`} key={video.id} className={styles.cardLink}>
       <div className={styles.videoCard}>
         <div className={styles.thumbnailContainer}>
           <Image

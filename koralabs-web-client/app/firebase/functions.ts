@@ -3,6 +3,7 @@ import { functions } from './firebase';
 
 const generateUploadUrlFunction = httpsCallable(functions, 'generateUploadUrl');
 const getVideosFunction = httpsCallable(functions, 'getVideos');
+const getVideoByIdFunction = httpsCallable(functions, 'getVideoById');
 const getUserVideosFunction = httpsCallable(functions, 'getUserVideos');
 const getUserByIdFunction = httpsCallable(functions, 'getUserById');
 const deleteVideoFunction = httpsCallable(functions, 'deleteVideo');
@@ -19,6 +20,7 @@ const editCommentFunction = httpsCallable(functions, 'editComment');
 const checkAdminStatusFunction = httpsCallable(functions, 'checkAdminStatus');
 const adminGetAllVideosFunction = httpsCallable(functions, 'adminGetAllVideos');
 const adminDeleteVideoFunction = httpsCallable(functions, 'adminDeleteVideo');
+const backfillUserDisplayNamesFunction = httpsCallable(functions, 'backfillUserDisplayNames');
 
 export async function uploadVideo(
   file: File,
@@ -74,6 +76,8 @@ export interface Video {
   commentCount?: number,
   viewCount?: number,
   resolutions?: string[],
+  hlsMasterUrl?: string,
+  streamType?: string,
 }
 
 export interface Comment {
@@ -86,6 +90,11 @@ export interface Comment {
 export async function getVideos() {
   const response: any = await getVideosFunction();
   return response.data as Video[];
+}
+
+export async function getVideoById(videoId: string): Promise<Video | null> {
+  const response: any = await getVideoByIdFunction({ videoId });
+  return response.data as Video | null;
 }
 
 export async function getUserVideos() {
@@ -197,4 +206,9 @@ export async function adminGetAllVideos(): Promise<Video[]> {
 export async function adminDeleteVideo(videoId: string): Promise<{ success: boolean }> {
   const response: any = await adminDeleteVideoFunction({ videoId });
   return response.data as { success: boolean };
+}
+
+export async function backfillUserDisplayNames(): Promise<{ updated: number }> {
+  const response: any = await backfillUserDisplayNamesFunction();
+  return response.data as { updated: number };
 }

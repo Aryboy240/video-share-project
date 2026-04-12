@@ -316,7 +316,9 @@ function StudioContent() {
   return (
     <div className={styles.studioPage}>
       <div className={styles.header}>
-        <h1 className={styles.heading}>Channel content</h1>
+        <h1 className={styles.heading}>
+          {currentUser?.displayName ? `Welcome, ${currentUser.displayName}` : 'Channel content'}
+        </h1>
         <button type="button" className={styles.uploadCta} onClick={openUploadModal}>
           Upload video
         </button>

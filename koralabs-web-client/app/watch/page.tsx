@@ -1,12 +1,13 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { useSearchParams } from 'next/navigation';
 import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { User as FirebaseAuthUser } from 'firebase/auth';
 import styles from './page.module.css';
 import {
-  getVideos, getUserById, formatUploader,
+  getVideos, getVideoById, getUserById, formatUploader,
   toggleLike, getLikeStatus,
   toggleSubscription, getSubscriptionStatus,
   addComment, getComments, deleteComment,
@@ -14,6 +15,7 @@ import {
   Video, User, Comment,
 } from '../firebase/functions';
 import { onAuthStateChangedHelper } from '../firebase/firebase';
+import type HlsType from 'hls.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -53,34 +55,64 @@ function formatTime(s: number): string {
   return `${m}:${String(sec).padStart(2, '0')}`;
 }
 
+function formatViewCount(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, '')}M views`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1).replace(/\.0$/, '')}K views`;
+  return `${n} ${n === 1 ? 'view' : 'views'}`;
+}
+
+function timeAgoFromDate(d: Date): string {
+  const s = Math.floor((Date.now() - d.getTime()) / 1000);
+  if (s < 60) return 'just now';
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const days = Math.floor(h / 24);
+  if (days < 7) return `${days}d ago`;
+  const weeks = Math.floor(days / 7);
+  if (weeks < 5) return `${weeks}w ago`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `${months}mo ago`;
+  return `${Math.floor(days / 365)}y ago`;
+}
+
+function shuffle<T>(arr: T[]): T[] {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
 // ── Bandwidth / auto-quality helpers ─────────────────────────────────────────
 
 async function estimateBandwidthMbps(testUrl: string): Promise<number> {
-  // Primary: Network Information API
-  const conn = (navigator as any).connection;
-  if (typeof conn?.downlink === 'number' && conn.downlink > 0) return conn.downlink;
-  // Fallback: time a 100 KB range fetch
+  // Fetch-timing only — navigator.connection.downlink is OS-level and ignores
+  // DevTools throttling, making it useless for real adaptive streaming.
   try {
     const start = performance.now();
     const resp = await fetch(testUrl, {
-      headers: { Range: 'bytes=0-102399' },
+      headers: { Range: 'bytes=0-204799' }, // 200 KB sample
       cache: 'no-store',
     });
     const blob = await resp.blob();
     const elapsed = (performance.now() - start) / 1000;
-    if (elapsed <= 0 || blob.size === 0) return 1;
+    if (elapsed <= 0 || blob.size === 0) return 1.5;
     return (blob.size * 8) / (elapsed * 1_000_000);
   } catch {
-    return 1; // ~1 Mbps → 480p safe default
+    return 1.5; // safe default → 480p
   }
 }
 
 function pickResolution(mbps: number, resolutions: string[]): string {
   // resolutions are highest-first (e.g. ["1080p","720p","480p","360p"])
-  if (mbps >= 5) return resolutions[0];
-  if (mbps >= 2) return resolutions.includes('720p') ? '720p' : resolutions[0];
-  if (mbps >= 0.8) return resolutions.includes('480p') ? '480p' : resolutions[resolutions.length - 1];
-  return resolutions.includes('360p') ? '360p' : resolutions[resolutions.length - 1];
+  const has = (r: string) => resolutions.includes(r);
+  if (mbps > 8) return resolutions[0];
+  if (mbps > 4) return has('720p') ? '720p' : resolutions[Math.min(1, resolutions.length - 1)];
+  if (mbps > 1.5) return has('480p') ? '480p' : resolutions[resolutions.length - 1];
+  return has('360p') ? '360p' : resolutions[resolutions.length - 1];
 }
 
 // ── SVG Icons ─────────────────────────────────────────────────────────────────
@@ -167,7 +199,12 @@ function WatchContent() {
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [editCommentText, setEditCommentText] = useState('');
   const [savingCommentId, setSavingCommentId] = useState<string | null>(null);
+  const [upNextVideos, setUpNextVideos] = useState<Video[]>([]);
+  const [upNextUserMap, setUpNextUserMap] = useState<Record<string, User | null>>({});
   const viewRecorded = useRef(false);
+  const viewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const commentsRef = useRef<HTMLDivElement>(null);
+  const commentsLoadedRef = useRef(false);
 
   // Player refs
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -183,6 +220,8 @@ function WatchContent() {
   const isAutoRef = useRef(true);
   const autoIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const selectedResolutionRef = useRef<string | null>(null);
+  const isSwitchingResRef = useRef(false);
+  const hlsRef = useRef<HlsType | null>(null);
 
   // Player state
   const [paused, setPaused] = useState(true);
@@ -197,6 +236,9 @@ function WatchContent() {
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
   const [showVolSlider, setShowVolSlider] = useState(false);
   const [feedbackState, setFeedbackState] = useState<{ icon: string; id: number } | null>(null);
+  const [hlsLevels, setHlsLevels] = useState<{ height: number; width: number }[]>([]);
+  const [hlsCurrentLevel, setHlsCurrentLevel] = useState(-1);
+  const [hlsAutoMode, setHlsAutoMode] = useState(true);
 
   // ── Firebase effects ──────────────────────────────────────────────────────────
 
@@ -207,20 +249,106 @@ function WatchContent() {
 
   useEffect(() => {
     if (!videoSrc) return;
-    getVideos().then((videos) => {
-      const match = videos.find((v) => v.filename === videoSrc);
-      setVideo(match ?? null);
-    });
+    getVideoById(videoSrc).then((v) => setVideo(v)).catch(() => setVideo(null));
   }, [videoSrc]);
+
+  // Fetch up-next suggestions: all videos minus current, shuffle, take 5
+  useEffect(() => {
+    if (!videoSrc) return;
+    getVideos().then(async (all) => {
+      const others = all.filter((v) => v.filename !== videoSrc && v.id !== videoSrc);
+      const picked = shuffle(others).slice(0, 5);
+      setUpNextVideos(picked);
+      const uids = [...new Set(picked.map((v) => v.uid).filter((u): u is string => !!u))];
+      const entries = await Promise.all(uids.map(async (uid) => {
+        try { return [uid, await getUserById(uid)] as const; }
+        catch { return [uid, null] as const; }
+      }));
+      setUpNextUserMap(Object.fromEntries(entries));
+    }).catch(() => {});
+  }, [videoSrc]);
+
+  // HLS.js — initialise for videos with an HLS master playlist
+  useEffect(() => {
+    if (!video?.hlsMasterUrl) return;
+    const v = videoRef.current;
+    if (!v) return;
+
+    let destroyed = false;
+
+    import('hls.js').then(({ default: Hls }) => {
+      if (destroyed) return;
+
+      if (Hls.isSupported()) {
+        const hls = new Hls({
+          // Start at lowest quality for fast initial load
+          startLevel: -1,
+          abrEwmaDefaultEstimate: 500000, // Conservative 500kbps starting estimate
+          // Aggressive ramping after first segment loads
+          abrBandWidthFactor: 0.85,       // Use 85% of measured bandwidth
+          abrBandWidthUpFactor: 0.7,      // Conservative when switching up
+          // Buffer tuning
+          maxBufferLength: 30,
+          maxMaxBufferLength: 60,
+          maxBufferSize: 60 * 1000 * 1000, // 60MB
+          liveSyncDurationCount: 3,
+          maxBufferHole: 0.5,
+          highBufferWatchdogPeriod: 2,
+        });
+        hls.startLevel = -1;
+        hlsRef.current = hls;
+        hls.loadSource(video.hlsMasterUrl!);
+        hls.attachMedia(v);
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          if (destroyed) return;
+          setHlsLevels(
+            hls.levels.map((l) => ({ height: l.height, width: l.width }))
+          );
+        });
+        hls.on(Hls.Events.LEVEL_SWITCHED, (_, data) => {
+          if (destroyed) return;
+          setHlsCurrentLevel(data.level);
+        });
+        hls.once(Hls.Events.FRAG_LOADED, () => {
+          console.log(
+            `[hls.js] First fragment loaded. Estimated bandwidth: ${Math.round(hls.bandwidthEstimate / 1000)} kbps`
+          );
+        });
+      } else if (v.canPlayType('application/vnd.apple.mpegurl')) {
+        // Safari native HLS — no programmatic quality control
+        v.src = video.hlsMasterUrl!;
+      }
+    });
+
+    return () => {
+      destroyed = true;
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
+      }
+      setHlsLevels([]);
+      setHlsCurrentLevel(-1);
+    };
+  }, [video?.hlsMasterUrl]);
 
   // Keep refs in sync
   useEffect(() => { isAutoRef.current = isAutoResolution; }, [isAutoResolution]);
   useEffect(() => { selectedResolutionRef.current = selectedResolution; }, [selectedResolution]);
 
+  // Shared core: saves playback position and triggers a resolution swap.
+  // Both manual UI and the auto-switcher go through this so the seamless
+  // src-swap useEffect below is the single code path for all switches.
+  const applyResolutionSwitch = useCallback((res: string) => {
+    if (selectedResolutionRef.current === res) return;
+    const v = videoRef.current;
+    restoreTimeRef.current = { time: v?.currentTime ?? 0, playing: !(v?.paused ?? true) };
+    setSelectedResolution(res);
+  }, []);
+
   // Auto-resolution: start/stop bandwidth polling based on isAutoResolution + resolutions
   useEffect(() => {
     const resolutions = video?.resolutions;
-    if (!resolutions || resolutions.length === 0) {
+    if (!resolutions || resolutions.length === 0 || video?.hlsMasterUrl) {
       setSelectedResolution(null);
       setAutoResLabel('');
       if (autoIntervalRef.current) { clearInterval(autoIntervalRef.current); autoIntervalRef.current = null; }
@@ -231,68 +359,97 @@ function WatchContent() {
       return;
     }
 
-    const testUrl = `${videoPrefix}${videoSrc}`;
+    // Use the lowest-res file as test URL — it always exists in the processed bucket
+    const testUrl = `${videoPrefix}${video?.id}_${resolutions[resolutions.length - 1]}.mp4`;
     const check = async () => {
       const mbps = await estimateBandwidthMbps(testUrl);
       if (!isAutoRef.current) return;
-      const picked = pickResolution(mbps, resolutions);
-      setAutoResLabel(picked);
-      if (selectedResolutionRef.current !== picked) {
-        const v = videoRef.current;
-        restoreTimeRef.current = { time: v?.currentTime ?? 0, playing: !(v?.paused ?? true) };
+      let picked = pickResolution(mbps, resolutions);
+
+      // Buffer stall override: < 2s buffered ahead while playing → drop one quality tier
+      const v = videoRef.current;
+      if (v && !v.paused && v.buffered.length > 0) {
+        const bufferedAhead = v.buffered.end(v.buffered.length - 1) - v.currentTime;
+        if (bufferedAhead < 2) {
+          const currentIdx = resolutions.indexOf(selectedResolutionRef.current ?? '');
+          const stallIdx = Math.min(currentIdx + 1, resolutions.length - 1);
+          const stall = resolutions[stallIdx];
+          if (resolutions.indexOf(stall) > resolutions.indexOf(picked)) {
+            picked = stall;
+          }
+        }
       }
-      setSelectedResolution(picked);
+
+      setAutoResLabel(picked);
+      applyResolutionSwitch(picked);
     };
 
     check();
-    autoIntervalRef.current = setInterval(check, 10_000);
+    autoIntervalRef.current = setInterval(check, 8_000);
     return () => {
       if (autoIntervalRef.current) { clearInterval(autoIntervalRef.current); autoIntervalRef.current = null; }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAutoResolution, video?.resolutions]);
+  }, [isAutoResolution, video?.resolutions, applyResolutionSwitch]);
 
+  // Parallelise: uploader info + like status + subscription status fire together
   useEffect(() => {
-    if (!video?.uid) { setUploader(null); return; }
-    getUserById(video.uid)
-      .then((u) => { setUploader(u); setSubscriberCount(u?.subscriberCount ?? 0); })
-      .catch(() => setUploader(null));
-  }, [video?.uid]);
+    const uid = video?.uid;
+    const id = video?.id;
+
+    if (!uid) setUploader(null);
+    if (!currentUser || !id) setLikeAction(null);
+    if (!currentUser || !uid || currentUser.uid === uid) setSubscribed(false);
+
+    const fetchUploader = uid
+      ? getUserById(uid)
+          .then((u) => { setUploader(u); setSubscriberCount(u?.subscriberCount ?? 0); })
+          .catch(() => setUploader(null))
+      : Promise.resolve();
+
+    const fetchLike = currentUser && id
+      ? getLikeStatus(id).then((r) => setLikeAction(r.action)).catch(() => setLikeAction(null))
+      : Promise.resolve();
+
+    const fetchSub = currentUser && uid && currentUser.uid !== uid
+      ? getSubscriptionStatus(uid).then((r) => setSubscribed(r.subscribed)).catch(() => setSubscribed(false))
+      : Promise.resolve();
+
+    Promise.all([fetchUploader, fetchLike, fetchSub]);
+  }, [currentUser, video?.uid, video?.id]);
 
   useEffect(() => {
     setLikeCount(video?.likeCount ?? 0);
     setDislikeCount(video?.dislikeCount ?? 0);
   }, [video?.likeCount, video?.dislikeCount]);
 
-  useEffect(() => {
-    if (!currentUser || !video?.id) { setLikeAction(null); return; }
-    getLikeStatus(video.id).then((r) => setLikeAction(r.action)).catch(() => setLikeAction(null));
-  }, [currentUser, video?.id]);
-
   useEffect(() => { setCommentCount(video?.commentCount ?? 0); }, [video?.commentCount]);
 
+  // Lazy-load comments: only fetch when the section scrolls into view
   useEffect(() => {
-    if (!video?.id) { setComments([]); return; }
-    getComments(video.id).then(async (fetched) => {
-      setComments(fetched);
-      const uids = [...new Set(fetched.map((c) => c.uid))];
-      const entries = await Promise.all(uids.map(async (uid) => {
-        try { return [uid, await getUserById(uid)] as const; }
-        catch { return [uid, null] as const; }
-      }));
-      setCommentUserMap(Object.fromEntries(entries));
-    }).catch(() => setComments([]));
-  }, [video?.id]);
-
-  useEffect(() => {
-    if (!currentUser || !video?.uid || currentUser.uid === video.uid) { setSubscribed(false); return; }
-    getSubscriptionStatus(video.uid).then((r) => setSubscribed(r.subscribed)).catch(() => setSubscribed(false));
-  }, [currentUser, video?.uid]);
-
-  useEffect(() => {
-    if (!video?.id || viewRecorded.current) return;
-    viewRecorded.current = true;
-    recordView(video.id).then((r) => setViewCount(r.viewCount)).catch(() => {});
+    const id = video?.id;
+    if (!id) { setComments([]); return; }
+    commentsLoadedRef.current = false;
+    const el = commentsRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry.isIntersecting || commentsLoadedRef.current) return;
+        commentsLoadedRef.current = true;
+        getComments(id).then(async (fetched) => {
+          setComments(fetched);
+          const uids = [...new Set(fetched.map((c) => c.uid))];
+          const entries = await Promise.all(uids.map(async (uid) => {
+            try { return [uid, await getUserById(uid)] as const; }
+            catch { return [uid, null] as const; }
+          }));
+          setCommentUserMap(Object.fromEntries(entries));
+        }).catch(() => setComments([]));
+      },
+      { rootMargin: '200px' },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
   }, [video?.id]);
 
   useEffect(() => {
@@ -355,6 +512,7 @@ function WatchContent() {
   }, []);
 
   const triggerFeedback = useCallback((icon: string) => {
+    if (isSwitchingResRef.current) return;
     feedbackIdRef.current += 1;
     const id = feedbackIdRef.current;
     setFeedbackState({ icon, id });
@@ -407,17 +565,23 @@ function WatchContent() {
   }, []);
 
   const handleResolutionChange = useCallback((res: string) => {
-    const v = videoRef.current;
-    restoreTimeRef.current = { time: v?.currentTime ?? 0, playing: !(v?.paused ?? true) };
     setIsAutoResolution(false);
     isAutoRef.current = false;
-    setSelectedResolution(res);
+    applyResolutionSwitch(res);
     setSettingsOpen(false);
-  }, []);
+  }, [applyResolutionSwitch]);
 
   const handleAutoResolution = useCallback(() => {
     setIsAutoResolution(true);
     isAutoRef.current = true;
+    setSettingsOpen(false);
+  }, []);
+
+  const handleHlsQuality = useCallback((levelIndex: number) => {
+    const hls = hlsRef.current;
+    if (!hls) return;
+    hls.loadLevel = levelIndex;
+    setHlsAutoMode(levelIndex === -1);
     setSettingsOpen(false);
   }, []);
 
@@ -567,6 +731,19 @@ function WatchContent() {
 
   const VolumeIcon = muted || volume === 0 ? IconVolumeMuted : volume < 0.5 ? IconVolumeLow : IconVolumeHigh;
 
+  // Imperatively swap src so the <video> element is never remounted on resolution
+  // change. React updating a src= attribute also triggers a full media reload, so
+  // we keep src out of JSX entirely and drive it here instead.
+  // Must appear after resolvedVideoUrl (plain const, subject to TDZ in dep array).
+  useEffect(() => {
+    if (video?.hlsMasterUrl) return; // HLS videos managed by hls.js
+    const v = videoRef.current;
+    if (!v || !resolvedVideoUrl) return;
+    isSwitchingResRef.current = true;
+    v.src = resolvedVideoUrl;
+    v.load();
+  }, [resolvedVideoUrl, video?.hlsMasterUrl]);
+
   // ── Render ────────────────────────────────────────────────────────────────────
 
   return (
@@ -582,11 +759,23 @@ function WatchContent() {
       >
         <video
           ref={videoRef}
-          src={resolvedVideoUrl}
           poster={posterUrl}
           className={styles.videoPlayer}
           onClick={togglePlay}
-          onPlay={() => { setPaused(false); resetControlsTimer(); }}
+          onPlay={() => {
+            setPaused(false);
+            resetControlsTimer();
+            if (video?.id && !viewRecorded.current) {
+              const vid = video.id;
+              if (viewTimerRef.current) clearTimeout(viewTimerRef.current);
+              viewTimerRef.current = setTimeout(() => {
+                if (!viewRecorded.current) {
+                  viewRecorded.current = true;
+                  recordView(vid).then((r) => setViewCount(r.viewCount)).catch(() => {});
+                }
+              }, 3000);
+            }
+          }}
           onPause={() => {
             setPaused(true);
             setControlsVisible(true);
@@ -611,6 +800,7 @@ function WatchContent() {
               if (restoreTimeRef.current.playing) v.play();
               restoreTimeRef.current = null;
             }
+            isSwitchingResRef.current = false;
           }}
         />
 
@@ -696,7 +886,39 @@ function WatchContent() {
                       </div>
                     </div>
 
-                    {video?.resolutions && video.resolutions.length > 1 && (
+                    {/* HLS quality selector */}
+                    {video?.hlsMasterUrl && hlsLevels.length > 1 && (
+                      <>
+                        <div className={styles.settingsDivider} />
+                        <div className={styles.settingsSection}>
+                          <div className={styles.settingsSectionLabel}>Quality</div>
+                          <div className={styles.settingsOptions}>
+                            <button
+                              type="button"
+                              className={`${styles.settingsOptionBtn}${hlsAutoMode ? ' ' + styles.settingsOptionActive : ''}`}
+                              onClick={() => handleHlsQuality(-1)}
+                            >
+                              {hlsAutoMode && hlsCurrentLevel >= 0
+                                ? `Auto (${hlsLevels[hlsCurrentLevel]?.height}p)`
+                                : 'Auto'}
+                            </button>
+                            {hlsLevels.map((level, idx) => (
+                              <button
+                                key={idx}
+                                type="button"
+                                className={`${styles.settingsOptionBtn}${!hlsAutoMode && hlsCurrentLevel === idx ? ' ' + styles.settingsOptionActive : ''}`}
+                                onClick={() => handleHlsQuality(idx)}
+                              >
+                                {level.height}p
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </>
+                    )}
+
+                    {/* Legacy MP4 multi-resolution quality selector */}
+                    {!video?.hlsMasterUrl && video?.resolutions && video.resolutions.length > 1 && (
                       <>
                         <div className={styles.settingsDivider} />
                         <div className={styles.settingsSection}>
@@ -816,12 +1038,22 @@ function WatchContent() {
             </div>
           </div>
 
-          <div id="comments" className={styles.commentsSection}>
+          <div id="comments" ref={commentsRef} className={styles.commentsSection}>
             <h2 className={styles.commentsHeading}>{commentCount} {commentCount === 1 ? 'Comment' : 'Comments'}</h2>
             <div className={styles.divider} />
 
             {currentUser ? (
               <div className={styles.commentPostRow}>
+                <div className={styles.commentAvatar}>
+                  {currentUser.photoURL ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={currentUser.photoURL} alt="Your avatar" className={styles.commentAvatarImg} referrerPolicy="no-referrer" />
+                  ) : (
+                    <span className={styles.avatarInitials}>
+                      {(currentUser.displayName || currentUser.email || 'U').slice(0, 1).toUpperCase()}
+                    </span>
+                  )}
+                </div>
                 <textarea
                   className={styles.commentInput}
                   value={commentText}
@@ -847,11 +1079,16 @@ function WatchContent() {
             {comments.map((c) => {
               const commenter = commentUserMap[c.uid] ?? null;
               const displayName = commenter?.displayName || commenter?.email || 'User';
-              const initials = displayName.slice(0, 2).toUpperCase();
+              const initial = displayName.slice(0, 1).toUpperCase();
               return (
                 <div key={c.id} className={styles.commentCard}>
                   <div className={styles.commentAvatar}>
-                    <span className={styles.avatarInitials}>{initials}</span>
+                    {commenter?.photoUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={commenter.photoUrl} alt={displayName} className={styles.commentAvatarImg} referrerPolicy="no-referrer" />
+                    ) : (
+                      <span className={styles.avatarInitials}>{initial}</span>
+                    )}
                   </div>
                   <div className={styles.commentContent}>
                     <div className={styles.commentHeader}>
@@ -917,22 +1154,37 @@ function WatchContent() {
 
         <div className={styles.sidebar}>
           <h2 className={styles.sidebarHeading}>Up Next</h2>
-          {[
-            { t: 'Related Video Title 1', d: '10:25' },
-            { t: 'Related Video Title 2', d: '15:42' },
-            { t: 'Related Video Title 3', d: '8:17' },
-            { t: 'Related Video Title 4', d: '12:30' },
-            { t: 'Related Video Title 5', d: '20:15' },
-          ].map((rv) => (
-            <div key={rv.t} className={styles.relatedVideoCard}>
-              <div className={styles.thumbnailPlaceholder} />
-              <div className={styles.videoDetails}>
-                <h3 className={styles.relatedVideoTitle}>{rv.t}</h3>
-                <p className={styles.channelName}>KoraLabs Video</p>
-                <p className={styles.duration}>{rv.d}</p>
-              </div>
-            </div>
-          ))}
+          {upNextVideos.length === 0 && (
+            <p className={styles.noComments}>No other videos yet.</p>
+          )}
+          {upNextVideos.map((v) => {
+            const thumb = v.thumbnailUrl || '/images/thumbnails/thumbnail.png';
+            const uploaderUser = v.uid ? upNextUserMap[v.uid] : null;
+            const uploaderName = formatUploader(uploaderUser);
+            const ts = parseUploadDate(v.id);
+            return (
+              <Link key={v.id} href={`/watch?v=${v.filename ?? v.id}`} className={styles.relatedVideoCard}>
+                <div className={styles.upNextThumb}>
+                  <Image
+                    src={thumb}
+                    alt={v.title || 'Video thumbnail'}
+                    width={120}
+                    height={68}
+                    className={styles.upNextThumbImg}
+                    unoptimized
+                  />
+                </div>
+                <div className={styles.videoDetails}>
+                  <h3 className={styles.relatedVideoTitle}>{v.title || 'Untitled'}</h3>
+                  <p className={styles.channelName}>{uploaderName}</p>
+                  <p className={styles.duration}>
+                    {formatViewCount(v.viewCount ?? 0)}
+                    {ts && <> · {timeAgoFromDate(ts)}</>}
+                  </p>
+                </div>
+              </Link>
+            );
+          })}
         </div>
       </div>
     </div>

@@ -24,6 +24,8 @@ export interface Video {
   title?: string,
   description?: string,
   resolutions?: string[],
+  hlsMasterUrl?: string,
+  streamType?: string,
 }
 
 async function getVideo(videoId: string) {

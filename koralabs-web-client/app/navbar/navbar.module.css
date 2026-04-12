@@ -97,6 +97,22 @@
     color: #555;
 }
 
+.clearButton {
+    background: none;
+    border: none;
+    color: #666;
+    cursor: pointer;
+    padding: 0 6px;
+    font-size: 13px;
+    line-height: 1;
+    flex-shrink: 0;
+    transition: color 0.15s ease;
+}
+
+.clearButton:hover {
+    color: #ffffff;
+}
+
 .searchButton {
     background: none;
     border: none;
