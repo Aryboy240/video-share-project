@@ -1,0 +1,304 @@
+.page {
+  background-color: #121212;
+  color: #ffffff;
+  min-height: 100vh;
+}
+
+/* ── Banner ─────────────────────────────────────────────────────────────────── */
+
+.banner {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 32px 40px;
+  background-color: #1a1a1a;
+  border-bottom: 1px solid #2a2a2a;
+  flex-wrap: wrap;
+}
+
+.bannerAvatar {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background-color: #2a2a2a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.bannerAvatarImg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.bannerAvatarInitial {
+  font-size: 32px;
+  font-weight: 700;
+  color: var(--primary-accent, #3ea6ff);
+}
+
+.bannerInfo {
+  flex: 1;
+  min-width: 0;
+}
+
+.bannerName {
+  margin: 0 0 6px;
+  font-size: 24px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.bannerSubs {
+  margin: 0;
+  font-size: 14px;
+  color: #aaa;
+}
+
+.bannerActions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.subscribeButton {
+  padding: 8px 20px;
+  border: none;
+  border-radius: 20px;
+  background-color: #fff;
+  color: #121212;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.subscribeButton:hover {
+  background-color: #e0e0e0;
+}
+
+.subscribeButton:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.unsubscribeButton {
+  padding: 8px 20px;
+  border: 1px solid #555;
+  border-radius: 20px;
+  background-color: transparent;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.unsubscribeButton:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.unsubscribeButton:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.editChannelButton {
+  padding: 8px 20px;
+  border: 1px solid #555;
+  border-radius: 20px;
+  background-color: transparent;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: background-color 0.15s ease;
+}
+
+.editChannelButton:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+/* ── Videos grid ─────────────────────────────────────────────────────────────── */
+
+.content {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 24px 40px;
+}
+
+.emptyState {
+  color: #666;
+  font-size: 14px;
+  text-align: center;
+  margin: 60px 0;
+}
+
+.notFound {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 80px 24px;
+  text-align: center;
+}
+
+.notFoundTitle {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 600;
+  color: #fff;
+}
+
+.notFoundMsg {
+  margin: 0;
+  font-size: 14px;
+  color: #888;
+}
+
+.notFoundLink {
+  display: inline-block;
+  margin-top: 6px;
+  padding: 9px 24px;
+  border: 1px solid var(--primary-accent);
+  border-radius: 6px;
+  color: var(--primary-accent);
+  font-size: 14px;
+  font-weight: 500;
+  text-decoration: none;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.notFoundLink:hover {
+  background-color: var(--primary-accent);
+  color: #000;
+}
+
+.videoGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px 20px;
+}
+
+.cardLink {
+  text-decoration: none;
+  color: inherit;
+  display: block;
+  border-radius: 10px;
+  padding: 10px;
+}
+
+.cardLink:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.videoCard {
+  display: flex;
+  flex-direction: column;
+  cursor: pointer;
+}
+
+.thumbnailContainer {
+  position: relative;
+  width: 100%;
+  padding-top: 56.25%;
+  border-radius: 8px;
+  overflow: hidden;
+  background-color: #1e1e1e;
+}
+
+.thumbnail {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: opacity 0.2s ease;
+}
+
+.durationBadge {
+  position: absolute;
+  bottom: 6px;
+  right: 6px;
+  background: rgba(0, 0, 0, 0.8);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  padding: 3px 5px;
+  border-radius: 4px;
+  pointer-events: none;
+}
+
+.cardLink:hover .thumbnail {
+  opacity: 0.88;
+}
+
+.cardInfo {
+  padding: 12px 4px 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.videoTitle {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.cardStats {
+  margin: 0;
+  font-size: 12px;
+  color: #aaa;
+}
+
+/* ── Responsive ──────────────────────────────────────────────────────────────── */
+
+@media (max-width: 600px) {
+  .banner {
+    padding: 20px 16px;
+    gap: 16px;
+  }
+  .content {
+    padding: 16px;
+  }
+  .videoGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (min-width: 601px) and (max-width: 900px) {
+  .banner,
+  .content {
+    padding-left: 20px;
+    padding-right: 20px;
+  }
+  .videoGrid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (min-width: 901px) and (max-width: 1200px) {
+  .videoGrid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (min-width: 1201px) {
+  .videoGrid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}

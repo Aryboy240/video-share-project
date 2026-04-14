@@ -13,12 +13,44 @@
   margin-top: 20px;
 }
 
-.cardLink {
-  text-decoration: none;
+.cardOuter {
   border-radius: 10px;
   padding: 10px;
+}
+
+.cardOuter:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.cardLink {
+  text-decoration: none;
   color: inherit;
   display: block;
+}
+
+.cardTitleLink {
+  text-decoration: none;
+  color: inherit;
+  display: block;
+}
+
+.cardAvatarLink {
+  text-decoration: none;
+  color: inherit;
+  display: block;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.cardUploaderLink {
+  text-decoration: none;
+  color: inherit;
+  display: block;
+}
+
+.cardUploaderLink:hover .cardUploaderName,
+.cardUploaderLink:hover p {
+  color: #fff;
 }
 
 .videoCard {
@@ -46,13 +78,23 @@
   transition: opacity 0.2s ease;
 }
 
+.durationBadge {
+  position: absolute;
+  bottom: 6px;
+  right: 6px;
+  background: rgba(0, 0, 0, 0.8);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  padding: 3px 5px;
+  border-radius: 4px;
+  pointer-events: none;
+}
+
 .cardLink:hover .thumbnail {
   opacity: 0.88;
   transition: opacity 0.2s ease;
-}
-
-.cardLink:hover {
-  background-color: rgba(255, 255, 255, 0.1);
 }
 
 /* Below-thumbnail meta row */
@@ -73,6 +115,7 @@
   overflow: hidden;
   flex-shrink: 0;
   margin-top: 2px;
+  cursor: pointer;
 }
 
 .cardAvatarImg {
@@ -143,6 +186,115 @@
   font-size: 14px;
   margin: 40px 0;
   text-align: center;
+}
+
+.emptyStateBox {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 64px 24px;
+  text-align: center;
+}
+
+.emptyStateIcon {
+  color: #444;
+}
+
+.emptyStateHeading {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+  color: #fff;
+}
+
+.emptyStateSubtext {
+  margin: 0;
+  font-size: 14px;
+  color: #888;
+}
+
+.emptyStateButton {
+  display: inline-block;
+  margin-top: 4px;
+  padding: 9px 24px;
+  border: 1px solid var(--primary-accent);
+  border-radius: 6px;
+  color: var(--primary-accent);
+  font-size: 14px;
+  font-weight: 500;
+  text-decoration: none;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.emptyStateButton:hover {
+  background-color: var(--primary-accent);
+  color: #000;
+}
+
+/* ── Skeleton shimmer ──────────────────────────────────────────────────────── */
+
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position:  200% 0; }
+}
+
+.skeleton {
+  background: linear-gradient(90deg, #1e1e1e 25%, #2a2a2a 50%, #1e1e1e 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite linear;
+  border-radius: 4px;
+  display: block;
+}
+
+.skeletonThumb {
+  width: 100%;
+  padding-top: 56.25%;
+  border-radius: 8px;
+}
+
+.skeletonAvatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.skeletonTitle {
+  height: 16px;
+  width: 88%;
+}
+
+.skeletonLine {
+  height: 13px;
+  width: 100%;
+}
+
+.skeletonLineMd {
+  width: 68%;
+}
+
+.skeletonLineSm {
+  width: 48%;
+}
+
+.skeletonCard {
+  border-radius: 10px;
+  padding: 10px;
+}
+
+.skeletonMeta {
+  display: flex;
+  gap: 12px;
+  padding: 12px 4px 4px;
+}
+
+.skeletonInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  flex: 1;
 }
 
 /* Responsive */

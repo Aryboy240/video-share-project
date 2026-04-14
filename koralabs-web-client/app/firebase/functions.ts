@@ -21,12 +21,17 @@ const checkAdminStatusFunction = httpsCallable(functions, 'checkAdminStatus');
 const adminGetAllVideosFunction = httpsCallable(functions, 'adminGetAllVideos');
 const adminDeleteVideoFunction = httpsCallable(functions, 'adminDeleteVideo');
 const backfillUserDisplayNamesFunction = httpsCallable(functions, 'backfillUserDisplayNames');
+const getChannelVideosFunction = httpsCallable(functions, 'getChannelVideos');
+const processThumbnailFunction = httpsCallable(functions, 'processThumbnail');
+const refreshUserAvatarFunction = httpsCallable(functions, 'refreshUserAvatar');
+const backfillUserAvatarsFunction = httpsCallable(functions, 'backfillUserAvatars');
 
 export async function uploadVideo(
   file: File,
   title: string,
   description: string,
   thumbnail?: File | null,
+  onProgress?: (percent: number) => void,
 ) {
   const thumbnailExtension = thumbnail
     ? thumbnail.name.split('.').pop()?.toLowerCase()
@@ -39,16 +44,28 @@ export async function uploadVideo(
     ...(thumbnailExtension ? { thumbnailExtension } : {}),
   });
 
-  // Upload the video file to the signed URL
-  const uploadResult = await fetch(response?.data?.url, {
-    method: 'PUT',
-    body: file,
-    headers: {
-      'Content-Type': file.type,
-    },
+  // Upload the video file via XHR so we can track progress
+  await new Promise<void>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('PUT', response?.data?.url);
+    xhr.setRequestHeader('Content-Type', file.type);
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable && onProgress) {
+        onProgress(Math.round((event.loaded / event.total) * 100));
+      }
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve();
+      } else {
+        reject(new Error(`Upload failed with status ${xhr.status}`));
+      }
+    };
+    xhr.onerror = () => reject(new Error('Upload failed (network error)'));
+    xhr.send(file);
   });
 
-  // Upload the thumbnail image if one was selected
+  // Upload the thumbnail image if one was selected (small file, no progress needed)
   if (thumbnail && response?.data?.thumbnailUploadUrl) {
     await fetch(response.data.thumbnailUploadUrl, {
       method: 'PUT',
@@ -58,9 +75,27 @@ export async function uploadVideo(
         'Cache-Control': 'public, max-age=31536000, immutable',
       },
     });
+    // Generate compressed variants server-side
+    const videoId = (response?.data?.fileName as string | undefined)?.split('.')[0];
+    const ext = thumbnailExtension;
+    if (videoId && ext) {
+      try {
+        await processThumbnailFunction({
+          videoId,
+          thumbnailPath: `thumbnails/${videoId}.${ext}`,
+        });
+      } catch (err) {
+        console.warn('processThumbnail failed (non-fatal):', err);
+      }
+    }
   }
+}
 
-  return uploadResult;
+export async function processThumbnail(
+  videoId: string,
+  thumbnailPath: string,
+): Promise<void> {
+  await processThumbnailFunction({ videoId, thumbnailPath });
 }
 
 export interface Video {
@@ -71,6 +106,8 @@ export interface Video {
   title?: string,
   description?: string,
   thumbnailUrl?: string,
+  thumbnailSmallUrl?: string,
+  thumbnailMediumUrl?: string,
   likeCount?: number,
   dislikeCount?: number,
   commentCount?: number,
@@ -78,6 +115,7 @@ export interface Video {
   resolutions?: string[],
   hlsMasterUrl?: string,
   streamType?: string,
+  duration?: number,
 }
 
 export interface Comment {
@@ -210,5 +248,20 @@ export async function adminDeleteVideo(videoId: string): Promise<{ success: bool
 
 export async function backfillUserDisplayNames(): Promise<{ updated: number }> {
   const response: any = await backfillUserDisplayNamesFunction();
+  return response.data as { updated: number };
+}
+
+export async function getChannelVideos(uid: string): Promise<Video[]> {
+  const response: any = await getChannelVideosFunction({ uid });
+  return response.data as Video[];
+}
+
+export async function refreshUserAvatar(): Promise<{ photoUrl: string | null }> {
+  const response: any = await refreshUserAvatarFunction();
+  return response.data as { photoUrl: string | null };
+}
+
+export async function backfillUserAvatars(): Promise<{ updated: number }> {
+  const response: any = await backfillUserAvatarsFunction();
   return response.data as { updated: number };
 }

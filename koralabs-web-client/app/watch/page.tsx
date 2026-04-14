@@ -86,35 +86,6 @@ function shuffle<T>(arr: T[]): T[] {
   return a;
 }
 
-// ── Bandwidth / auto-quality helpers ─────────────────────────────────────────
-
-async function estimateBandwidthMbps(testUrl: string): Promise<number> {
-  // Fetch-timing only — navigator.connection.downlink is OS-level and ignores
-  // DevTools throttling, making it useless for real adaptive streaming.
-  try {
-    const start = performance.now();
-    const resp = await fetch(testUrl, {
-      headers: { Range: 'bytes=0-204799' }, // 200 KB sample
-      cache: 'no-store',
-    });
-    const blob = await resp.blob();
-    const elapsed = (performance.now() - start) / 1000;
-    if (elapsed <= 0 || blob.size === 0) return 1.5;
-    return (blob.size * 8) / (elapsed * 1_000_000);
-  } catch {
-    return 1.5; // safe default → 480p
-  }
-}
-
-function pickResolution(mbps: number, resolutions: string[]): string {
-  // resolutions are highest-first (e.g. ["1080p","720p","480p","360p"])
-  const has = (r: string) => resolutions.includes(r);
-  if (mbps > 8) return resolutions[0];
-  if (mbps > 4) return has('720p') ? '720p' : resolutions[Math.min(1, resolutions.length - 1)];
-  if (mbps > 1.5) return has('480p') ? '480p' : resolutions[resolutions.length - 1];
-  return has('360p') ? '360p' : resolutions[resolutions.length - 1];
-}
-
 // ── SVG Icons ─────────────────────────────────────────────────────────────────
 
 function IconPlay() {
@@ -176,6 +147,7 @@ function WatchContent() {
 
   // Firebase / page state
   const [video, setVideo] = useState<Video | null>(null);
+  const [videoLoading, setVideoLoading] = useState(!!videoSrc);
   const [uploader, setUploader] = useState<User | null>(null);
   const [currentUser, setCurrentUser] = useState<FirebaseAuthUser | null>(null);
   const [subscribed, setSubscribed] = useState(false);
@@ -218,7 +190,6 @@ function WatchContent() {
   const pausedRef = useRef(true);
   const restoreTimeRef = useRef<{ time: number; playing: boolean } | null>(null);
   const isAutoRef = useRef(true);
-  const autoIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const selectedResolutionRef = useRef<string | null>(null);
   const isSwitchingResRef = useRef(false);
   const hlsRef = useRef<HlsType | null>(null);
@@ -239,6 +210,7 @@ function WatchContent() {
   const [hlsLevels, setHlsLevels] = useState<{ height: number; width: number }[]>([]);
   const [hlsCurrentLevel, setHlsCurrentLevel] = useState(-1);
   const [hlsAutoMode, setHlsAutoMode] = useState(true);
+  const [isBuffering, setIsBuffering] = useState(false);
 
   // ── Firebase effects ──────────────────────────────────────────────────────────
 
@@ -249,7 +221,11 @@ function WatchContent() {
 
   useEffect(() => {
     if (!videoSrc) return;
-    getVideoById(videoSrc).then((v) => setVideo(v)).catch(() => setVideo(null));
+    setVideoLoading(true);
+    getVideoById(videoSrc)
+      .then((v) => setVideo(v))
+      .catch(() => setVideo(null))
+      .finally(() => setVideoLoading(false));
   }, [videoSrc]);
 
   // Fetch up-next suggestions: all videos minus current, shuffle, take 5
@@ -281,21 +257,32 @@ function WatchContent() {
 
       if (Hls.isSupported()) {
         const hls = new Hls({
-          // Start at lowest quality for fast initial load
+          // Start conservative, ramp up based on buffer health
           startLevel: -1,
-          abrEwmaDefaultEstimate: 500000, // Conservative 500kbps starting estimate
-          // Aggressive ramping after first segment loads
-          abrBandWidthFactor: 0.85,       // Use 85% of measured bandwidth
-          abrBandWidthUpFactor: 0.7,      // Conservative when switching up
+          abrEwmaDefaultEstimate: 150000, // Very slow default → lowest quality start
+          // Bandwidth factors — conservative upswitch, aggressive downswitch
+          abrBandWidthFactor: 0.75,
+          abrBandWidthUpFactor: 0.55,
+          abrMaxWithRealBitrate: true,
+          // EWMA time constants for bandwidth estimation
+          abrEwmaFastLive: 3,
+          abrEwmaSlowLive: 9,
+          abrEwmaFastVoD: 3,
+          abrEwmaSlowVoD: 9,
           // Buffer tuning
           maxBufferLength: 30,
           maxMaxBufferLength: 60,
-          maxBufferSize: 60 * 1000 * 1000, // 60MB
-          liveSyncDurationCount: 3,
+          maxBufferSize: 60 * 1000 * 1000,
           maxBufferHole: 0.5,
-          highBufferWatchdogPeriod: 2,
+          // Stall recovery
+          nudgeOffset: 0.1,
+          nudgeMaxRetry: 3,
+          // Disable features that interfere with clean ABR
+          testBandwidth: false,
+          progressive: false,
+          lowLatencyMode: false,
+          startFragPrefetch: false,
         });
-        hls.startLevel = -1;
         hlsRef.current = hls;
         hls.loadSource(video.hlsMasterUrl!);
         hls.attachMedia(v);
@@ -304,15 +291,31 @@ function WatchContent() {
           setHlsLevels(
             hls.levels.map((l) => ({ height: l.height, width: l.width }))
           );
+          // Level 0 is now lowest quality (master playlist written ascending).
+          // Force start at lowest quality, then hand control back to ABR.
+          hls.startLevel = 0;
+          hls.nextLevel = 0;
+          hls.currentLevel = 0;
+          hls.loadLevel = -1; // re-enable auto ABR after forcing start level
         });
         hls.on(Hls.Events.LEVEL_SWITCHED, (_, data) => {
           if (destroyed) return;
           setHlsCurrentLevel(data.level);
         });
-        hls.once(Hls.Events.FRAG_LOADED, () => {
-          console.log(
-            `[hls.js] First fragment loaded. Estimated bandwidth: ${Math.round(hls.bandwidthEstimate / 1000)} kbps`
-          );
+        hls.on(Hls.Events.FRAG_LOADED, () => {
+          if (destroyed) return;
+          setIsBuffering(false);
+        });
+        hls.on(Hls.Events.FRAG_BUFFERED, (_, data) => {
+          if (destroyed) return;
+          // If fragment took longer to download than its duration, drop quality.
+          // Levels are now ascending (0 = lowest), so dropping = lower index.
+          if (
+            data.stats.loading.end - data.stats.loading.start >
+            data.frag.duration * 1000
+          ) {
+            hls.nextLevel = Math.max(hls.currentLevel - 1, 0);
+          }
         });
       } else if (v.canPlayType('application/vnd.apple.mpegurl')) {
         // Safari native HLS — no programmatic quality control
@@ -345,52 +348,20 @@ function WatchContent() {
     setSelectedResolution(res);
   }, []);
 
-  // Auto-resolution: start/stop bandwidth polling based on isAutoResolution + resolutions
+  // Resolution reset: clear selected resolution for HLS or videos with no resolutions list
   useEffect(() => {
     const resolutions = video?.resolutions;
     if (!resolutions || resolutions.length === 0 || video?.hlsMasterUrl) {
       setSelectedResolution(null);
       setAutoResLabel('');
-      if (autoIntervalRef.current) { clearInterval(autoIntervalRef.current); autoIntervalRef.current = null; }
       return;
     }
-    if (!isAutoResolution) {
-      if (autoIntervalRef.current) { clearInterval(autoIntervalRef.current); autoIntervalRef.current = null; }
-      return;
+    // Legacy MP4 auto mode: default to highest available quality
+    if (isAutoResolution) {
+      setAutoResLabel(resolutions[0]);
+      applyResolutionSwitch(resolutions[0]);
     }
-
-    // Use the lowest-res file as test URL — it always exists in the processed bucket
-    const testUrl = `${videoPrefix}${video?.id}_${resolutions[resolutions.length - 1]}.mp4`;
-    const check = async () => {
-      const mbps = await estimateBandwidthMbps(testUrl);
-      if (!isAutoRef.current) return;
-      let picked = pickResolution(mbps, resolutions);
-
-      // Buffer stall override: < 2s buffered ahead while playing → drop one quality tier
-      const v = videoRef.current;
-      if (v && !v.paused && v.buffered.length > 0) {
-        const bufferedAhead = v.buffered.end(v.buffered.length - 1) - v.currentTime;
-        if (bufferedAhead < 2) {
-          const currentIdx = resolutions.indexOf(selectedResolutionRef.current ?? '');
-          const stallIdx = Math.min(currentIdx + 1, resolutions.length - 1);
-          const stall = resolutions[stallIdx];
-          if (resolutions.indexOf(stall) > resolutions.indexOf(picked)) {
-            picked = stall;
-          }
-        }
-      }
-
-      setAutoResLabel(picked);
-      applyResolutionSwitch(picked);
-    };
-
-    check();
-    autoIntervalRef.current = setInterval(check, 8_000);
-    return () => {
-      if (autoIntervalRef.current) { clearInterval(autoIntervalRef.current); autoIntervalRef.current = null; }
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAutoResolution, video?.resolutions, applyResolutionSwitch]);
+  }, [isAutoResolution, video?.resolutions, video?.hlsMasterUrl, applyResolutionSwitch]);
 
   // Parallelise: uploader info + like status + subscription status fire together
   useEffect(() => {
@@ -718,8 +689,8 @@ function WatchContent() {
   const title = video?.title && video.title.length > 0 ? video.title : 'Untitled';
   const description = video?.description && video.description.length > 0 ? video.description : null;
   const uploaderLabel = formatUploader(uploader);
-  const posterUrl = video?.thumbnailUrl && video.thumbnailUrl.length > 0
-    ? video.thumbnailUrl : '/images/thumbnails/thumbnail.png';
+  const posterUrl =
+    video?.thumbnailMediumUrl ?? '/images/thumbnails/thumbnail.png';
 
   const resolvedVideoUrl =
     video?.resolutions && video.resolutions.length > 0 && selectedResolution
@@ -746,6 +717,57 @@ function WatchContent() {
 
   // ── Render ────────────────────────────────────────────────────────────────────
 
+  if (!videoLoading && !video) {
+    return (
+      <div className={styles.watchPage}>
+        <div className={styles.videoNotFound}>
+          <svg xmlns="http://www.w3.org/2000/svg" width="56" height="56" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M3.98 8.223A10.477 10.477 0 0 0 1.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.451 10.451 0 0 1 12 4.5c4.756 0 8.773 3.162 10.065 7.498a10.522 10.522 0 0 1-4.293 5.774M6.228 6.228 3 3m3.228 3.228 3.65 3.65m7.894 7.894L21 21m-3.228-3.228-3.65-3.65m0 0a3 3 0 1 0-4.243-4.243m4.242 4.242L9.88 9.88" />
+          </svg>
+          <h2 className={styles.videoNotFoundTitle}>Video not found</h2>
+          <p className={styles.videoNotFoundMsg}>This video may have been removed or the link is invalid.</p>
+          <Link href="/" className={styles.videoNotFoundLink}>Browse videos</Link>
+        </div>
+      </div>
+    );
+  }
+
+  if (videoLoading) {
+    return (
+      <div className={styles.watchPage}>
+        <div className={`${styles.skeleton} ${styles.skeletonPlayer}`} />
+        <div className={styles.contentRow}>
+          <div className={styles.mainColumn}>
+            <div className={styles.skeletonVideoInfo}>
+              <div className={`${styles.skeleton} ${styles.skeletonTitleLg}`} />
+              <div className={`${styles.skeleton} ${styles.skeletonTitleLg} ${styles.skeletonTitleLgShort}`} />
+              <div className={styles.skeletonChannelRow}>
+                <div className={`${styles.skeleton} ${styles.skeletonAvatarLg}`} />
+                <div className={`${styles.skeleton} ${styles.skeletonLine} ${styles.skeletonLineMd}`} />
+              </div>
+              <div className={`${styles.skeleton} ${styles.skeletonLine}`} />
+              <div className={`${styles.skeleton} ${styles.skeletonLine}`} />
+              <div className={`${styles.skeleton} ${styles.skeletonLine} ${styles.skeletonLineMd}`} />
+            </div>
+          </div>
+          <div className={styles.sidebar}>
+            <h2 className={styles.sidebarHeading}>Up Next</h2>
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className={styles.skeletonRelatedCard}>
+                <div className={`${styles.skeleton} ${styles.skeletonRelatedThumb}`} />
+                <div className={styles.skeletonRelatedInfo}>
+                  <div className={`${styles.skeleton} ${styles.skeletonLine}`} />
+                  <div className={`${styles.skeleton} ${styles.skeletonLine} ${styles.skeletonLineMd}`} />
+                  <div className={`${styles.skeleton} ${styles.skeletonLine} ${styles.skeletonLineSm}`} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className={styles.watchPage}>
 
@@ -762,6 +784,11 @@ function WatchContent() {
           poster={posterUrl}
           className={styles.videoPlayer}
           onClick={togglePlay}
+          onWaiting={() => setIsBuffering(true)}
+          onStalled={() => setIsBuffering(true)}
+          onPlaying={() => setIsBuffering(false)}
+          onCanPlay={() => setIsBuffering(false)}
+          onCanPlayThrough={() => setIsBuffering(false)}
           onPlay={() => {
             setPaused(false);
             resetControlsTimer();
@@ -809,6 +836,11 @@ function WatchContent() {
           <div key={feedbackState.id} className={styles.feedbackOverlay}>
             {feedbackState.icon}
           </div>
+        )}
+
+        {/* Buffering spinner */}
+        {isBuffering && !paused && (
+          <div className={styles.bufferingSpinner} />
         )}
 
         {/* Control bar */}
@@ -899,19 +931,22 @@ function WatchContent() {
                               onClick={() => handleHlsQuality(-1)}
                             >
                               {hlsAutoMode && hlsCurrentLevel >= 0
-                                ? `Auto (${hlsLevels[hlsCurrentLevel]?.height}p)`
+                                ? `Auto • ${hlsLevels[hlsCurrentLevel]?.height}p`
                                 : 'Auto'}
                             </button>
-                            {hlsLevels.map((level, idx) => (
-                              <button
-                                key={idx}
-                                type="button"
-                                className={`${styles.settingsOptionBtn}${!hlsAutoMode && hlsCurrentLevel === idx ? ' ' + styles.settingsOptionActive : ''}`}
-                                onClick={() => handleHlsQuality(idx)}
-                              >
-                                {level.height}p
-                              </button>
-                            ))}
+                            {[...hlsLevels].reverse().map((level, revIdx) => {
+                              const idx = hlsLevels.length - 1 - revIdx;
+                              return (
+                                <button
+                                  key={idx}
+                                  type="button"
+                                  className={`${styles.settingsOptionBtn}${!hlsAutoMode && hlsCurrentLevel === idx ? ' ' + styles.settingsOptionActive : ''}`}
+                                  onClick={() => handleHlsQuality(idx)}
+                                >
+                                  {level.height}p
+                                </button>
+                              );
+                            })}
                           </div>
                         </div>
                       </>
@@ -929,7 +964,7 @@ function WatchContent() {
                               className={`${styles.settingsOptionBtn}${isAutoResolution ? ' ' + styles.settingsOptionActive : ''}`}
                               onClick={handleAutoResolution}
                             >
-                              {isAutoResolution && autoResLabel ? `Auto (${autoResLabel})` : 'Auto'}
+                              {isAutoResolution && autoResLabel ? `Auto • ${autoResLabel}` : 'Auto'}
                             </button>
                             {video.resolutions.map((res) => (
                               <button
@@ -1014,7 +1049,13 @@ function WatchContent() {
                   )}
                 </div>
                 <div className={styles.channelInfo}>
-                  <h3 className={styles.channelName}>{uploaderLabel}</h3>
+                  <h3 className={styles.channelName}>
+                    {video?.uid ? (
+                      <Link href={`/channel/${video.uid}`} className={styles.channelNameLink}>
+                        {uploaderLabel}
+                      </Link>
+                    ) : uploaderLabel}
+                  </h3>
                   <span className={styles.subscriberCount}>
                     {subscriberCount} {subscriberCount === 1 ? 'subscriber' : 'subscribers'}
                   </span>
@@ -1158,7 +1199,7 @@ function WatchContent() {
             <p className={styles.noComments}>No other videos yet.</p>
           )}
           {upNextVideos.map((v) => {
-            const thumb = v.thumbnailUrl || '/images/thumbnails/thumbnail.png';
+            const thumb = v.thumbnailSmallUrl ?? '/images/thumbnails/thumbnail.png';
             const uploaderUser = v.uid ? upNextUserMap[v.uid] : null;
             const uploaderName = formatUploader(uploaderUser);
             const ts = parseUploadDate(v.id);

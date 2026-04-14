@@ -58,6 +58,12 @@ export default function SignIn({ user }: SignInProps) {
                 <div className={styles.dropdown}>
                     <button
                         className={styles.dropdownItem}
+                        onClick={() => { setOpen(false); router.push(`/channel/${user.uid}`); }}
+                    >
+                        My Channel
+                    </button>
+                    <button
+                        className={styles.dropdownItem}
                         onClick={() => { setOpen(false); router.push('/studio'); }}
                     >
                         Studio

@@ -5,6 +5,8 @@ import { useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 import Link from 'next/link';
 import { getVideos, getUserById, formatUploader, User, Video } from './firebase/functions';
+import { onAuthStateChangedHelper } from './firebase/firebase';
+import { User as FirebaseAuthUser } from 'firebase/auth';
 import styles from './page.module.css';
 
 function formatViewCount(n: number): string {
@@ -30,6 +32,14 @@ function timeAgo(timestamp: number): string {
   return `${years} ${years === 1 ? 'year' : 'years'} ago`;
 }
 
+function formatDuration(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = seconds % 60;
+  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
 function parseTimestamp(id?: string): number | null {
   if (!id) return null;
   const idx = id.lastIndexOf('-');
@@ -38,19 +48,42 @@ function parseTimestamp(id?: string): number | null {
   return Number.isFinite(ts) ? ts : null;
 }
 
+function SkeletonCard() {
+  return (
+    <div className={styles.skeletonCard}>
+      <div className={`${styles.skeleton} ${styles.skeletonThumb}`} />
+      <div className={styles.skeletonMeta}>
+        <div className={`${styles.skeleton} ${styles.skeletonAvatar}`} />
+        <div className={styles.skeletonInfo}>
+          <div className={`${styles.skeleton} ${styles.skeletonTitle}`} />
+          <div className={`${styles.skeleton} ${styles.skeletonLine} ${styles.skeletonLineMd}`} />
+          <div className={`${styles.skeleton} ${styles.skeletonLine} ${styles.skeletonLineSm}`} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function VideoCard({ video, userMap }: { video: Video; userMap: Map<string, User | null> }) {
   const uploader = video.uid ? userMap.get(video.uid) : null;
   const uploaderName = formatUploader(uploader);
   const initial = uploaderName.slice(0, 1).toUpperCase();
   const ts = parseTimestamp(video.id);
   const thumbSrc =
-    video.thumbnailUrl && video.thumbnailUrl.length > 0
-      ? video.thumbnailUrl
-      : '/images/thumbnails/thumbnail.png';
+    video.thumbnailSmallUrl ?? '/images/thumbnails/thumbnail.png';
+  const watchHref = `/watch?v=${video.filename ?? video.id}`;
+  const channelHref = video.uid ? `/channel/${video.uid}` : null;
+
+  const avatarEl = uploader?.photoUrl ? (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img src={uploader.photoUrl} alt={uploaderName} className={styles.cardAvatarImg} />
+  ) : (
+    <span className={styles.cardAvatarInitials}>{initial}</span>
+  );
 
   return (
-    <Link href={`/watch?v=${video.filename ?? video.id}`} key={video.id} className={styles.cardLink}>
-      <div className={styles.videoCard}>
+    <div className={styles.cardOuter}>
+      <Link href={watchHref} className={styles.cardLink}>
         <div className={styles.thumbnailContainer}>
           <Image
             src={thumbSrc}
@@ -60,27 +93,37 @@ function VideoCard({ video, userMap }: { video: Video; userMap: Map<string, User
             className={styles.thumbnail}
             unoptimized
           />
+          {video.duration != null && (
+            <span className={styles.durationBadge}>{formatDuration(video.duration)}</span>
+          )}
         </div>
-        <div className={styles.cardMeta}>
-          <div className={styles.cardAvatar}>
-            {uploader?.photoUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={uploader.photoUrl} alt={uploaderName} className={styles.cardAvatarImg} />
-            ) : (
-              <span className={styles.cardAvatarInitials}>{initial}</span>
-            )}
-          </div>
-          <div className={styles.cardInfo}>
+      </Link>
+      <div className={styles.cardMeta}>
+        {channelHref ? (
+          <Link href={channelHref} className={styles.cardAvatarLink}>
+            <div className={styles.cardAvatar}>{avatarEl}</div>
+          </Link>
+        ) : (
+          <div className={styles.cardAvatar}>{avatarEl}</div>
+        )}
+        <div className={styles.cardInfo}>
+          <Link href={watchHref} className={styles.cardTitleLink}>
             <h3 className={styles.videoTitle}>{video.title || 'Untitled'}</h3>
+          </Link>
+          {channelHref ? (
+            <Link href={channelHref} className={styles.cardUploaderLink}>
+              <p className={styles.cardUploaderName}>{uploaderName}</p>
+            </Link>
+          ) : (
             <p className={styles.cardUploaderName}>{uploaderName}</p>
-            <p className={styles.cardStats}>
-              {formatViewCount(video.viewCount ?? 0)}
-              {ts !== null && <> &bull; {timeAgo(ts)}</>}
-            </p>
-          </div>
+          )}
+          <p className={styles.cardStats}>
+            {formatViewCount(video.viewCount ?? 0)}
+            {ts !== null && <> &bull; {timeAgo(ts)}</>}
+          </p>
         </div>
       </div>
-    </Link>
+    </div>
   );
 }
 
@@ -91,6 +134,12 @@ function HomeContent() {
   const [allVideos, setAllVideos] = useState<Video[]>([]);
   const [userMap, setUserMap] = useState<Map<string, User | null>>(new Map());
   const [loading, setLoading] = useState(true);
+  const [currentUser, setCurrentUser] = useState<FirebaseAuthUser | null | undefined>(undefined);
+
+  useEffect(() => {
+    const unsub = onAuthStateChangedHelper((u) => setCurrentUser(u));
+    return () => unsub();
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -139,11 +188,24 @@ function HomeContent() {
         </p>
       )}
       {loading ? (
-        <p className={styles.loadingState}>Loading videos…</p>
+        <div className={styles.videoGrid}>
+          {Array.from({ length: 8 }).map((_, i) => <SkeletonCard key={i} />)}
+        </div>
       ) : filteredVideos.length === 0 ? (
-        <p className={styles.emptyState}>
-          {query ? `No videos found for '${query}'.` : 'No videos yet.'}
-        </p>
+        query ? (
+          <p className={styles.emptyState}>No videos found for &lsquo;{query}&rsquo;.</p>
+        ) : currentUser ? (
+          <div className={styles.emptyStateBox}>
+            <svg xmlns="http://www.w3.org/2000/svg" width="52" height="52" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.2} className={styles.emptyStateIcon}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 0 1 0 1.972l-11.54 6.347a1.125 1.125 0 0 1-1.667-.986V5.653Z" />
+            </svg>
+            <h2 className={styles.emptyStateHeading}>No videos yet</h2>
+            <p className={styles.emptyStateSubtext}>Be the first to upload</p>
+            <a href="/studio" className={styles.emptyStateButton}>Upload a video</a>
+          </div>
+        ) : (
+          <p className={styles.emptyState}>No videos have been uploaded yet.</p>
+        )
       ) : (
         <div className={styles.videoGrid}>
           {filteredVideos.map((video) => (

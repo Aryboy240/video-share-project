@@ -5,6 +5,7 @@ import {
   deleteRawVideo,
   deleteRawVideoFromBucket,
   transcodeToHLS,
+  getVideoDuration,
   setupDirectories
 } from './storage';
 
@@ -59,11 +60,20 @@ app.post('/process-video', async (req, res) => {
 
   const hlsMasterUrl =
     `https://storage.googleapis.com/koralabs-processed-videos/${masterFilename}`;
+
+  let duration: number | undefined;
+  try {
+    duration = await getVideoDuration(`./raw-videos/${inputFileName}`);
+  } catch (err) {
+    console.warn('Could not determine video duration:', err);
+  }
+
   await setVideo(videoId, {
     status: 'processed',
     filename: videoId,  // used as the watch URL param for HLS videos
     hlsMasterUrl,
     streamType: 'hls',
+    ...(duration !== undefined ? { duration } : {}),
   });
 
   try {

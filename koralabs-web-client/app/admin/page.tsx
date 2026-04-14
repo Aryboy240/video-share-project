@@ -7,6 +7,8 @@ import {
   checkAdminStatus,
   adminGetAllVideos,
   adminDeleteVideo,
+  backfillUserDisplayNames,
+  backfillUserAvatars,
   Video,
 } from '../firebase/functions';
 import styles from './admin.module.css';
@@ -28,6 +30,8 @@ export default function AdminPage() {
   const [loadingVideos, setLoadingVideos] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [backfillingNames, setBackfillingNames] = useState(false);
+  const [backfillingAvatars, setBackfillingAvatars] = useState(false);
 
   useEffect(() => {
     const unsub = onAuthStateChangedHelper(async (user) => {
@@ -84,12 +88,46 @@ export default function AdminPage() {
     router.replace('/admin/login');
   };
 
+  const handleBackfillNames = async () => {
+    if (backfillingNames) return;
+    setBackfillingNames(true);
+    try {
+      const { updated } = await backfillUserDisplayNames();
+      alert(`Backfill display names complete. Updated: ${updated}`);
+    } catch (err) {
+      alert(`Backfill failed: ${err}`);
+    } finally {
+      setBackfillingNames(false);
+    }
+  };
+
+  // TEMPORARY - remove after running once
+  const handleBackfillAvatars = async () => {
+    if (backfillingAvatars) return;
+    setBackfillingAvatars(true);
+    try {
+      const { updated } = await backfillUserAvatars();
+      alert(`Backfill avatars complete. Updated: ${updated}`);
+    } catch (err) {
+      alert(`Backfill avatars failed: ${err}`);
+    } finally {
+      setBackfillingAvatars(false);
+    }
+  };
+
   if (!authChecked) return null;
 
   return (
     <div className={styles.page}>
       <div className={styles.header}>
         <h1 className={styles.heading}>Admin Dashboard</h1>
+        <button type="button" className={styles.signOutButton} onClick={handleBackfillNames} disabled={backfillingNames}>
+          {backfillingNames ? 'Backfilling…' : 'Backfill Names'}
+        </button>
+        {/* TEMPORARY - remove after running once */}
+        <button type="button" className={styles.signOutButton} onClick={handleBackfillAvatars} disabled={backfillingAvatars}>
+          {backfillingAvatars ? 'Backfilling…' : 'Backfill Avatars'}
+        </button>
         <button type="button" className={styles.signOutButton} onClick={handleSignOut}>
           Sign out
         </button>
@@ -114,10 +152,7 @@ export default function AdminPage() {
         )}
 
         {videos.map((v) => {
-          const thumb =
-            v.thumbnailUrl && v.thumbnailUrl.length > 0
-              ? v.thumbnailUrl
-              : '/images/thumbnails/thumbnail.png';
+          const thumb = v.thumbnailSmallUrl ?? '/images/thumbnails/thumbnail.png';
           return (
             <div key={v.id} className={styles.tableRow}>
               <div>

@@ -10,6 +10,7 @@ import {
   uploadVideo,
   deleteVideo,
   updateVideoMetadata,
+  processThumbnail,
   Video,
 } from '../firebase/functions';
 import { onAuthStateChangedHelper } from '../firebase/firebase';
@@ -54,6 +55,7 @@ function StudioContent() {
   const [thumbnail, setThumbnail] = useState<File | null>(null);
   const [thumbnailPreview, setThumbnailPreview] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [dragOver, setDragOver] = useState(false);
   const [thumbnailError, setThumbnailError] = useState<string | null>(null);
 
@@ -104,7 +106,7 @@ function StudioContent() {
     setTitle(video.title || '');
     setDescription(video.description || '');
     setThumbnail(null);
-    setThumbnailPreview(video.thumbnailUrl || null);
+    setThumbnailPreview(video.thumbnailMediumUrl ?? video.thumbnailSmallUrl ?? null);
     setSaving(false);
     setDragOver(false);
     setThumbnailError(null);
@@ -175,6 +177,7 @@ function StudioContent() {
     setSaving(false);
     setDragOver(false);
     setThumbnailError(null);
+    setUploadProgress(0);
     if (fileInputRef.current) fileInputRef.current.value = '';
     if (thumbnailInputRef.current) thumbnailInputRef.current.value = '';
   };
@@ -234,7 +237,7 @@ function StudioContent() {
     setThumbnail(null);
     setThumbnailError(null);
     // In edit mode revert to the existing thumbnail, in upload mode clear
-    setThumbnailPreview(isEditMode ? (editingVideo?.thumbnailUrl || null) : null);
+    setThumbnailPreview(isEditMode ? (editingVideo?.thumbnailMediumUrl ?? editingVideo?.thumbnailSmallUrl ?? null) : null);
     if (thumbnailInputRef.current) thumbnailInputRef.current.value = '';
   };
 
@@ -244,14 +247,18 @@ function StudioContent() {
   const handlePublish = async () => {
     if (!file || !title.trim()) return;
     setSaving(true);
+    setUploadProgress(0);
     try {
-      await uploadVideo(file, title.trim(), description.trim(), thumbnail);
+      await uploadVideo(file, title.trim(), description.trim(), thumbnail, (percent) => {
+        setUploadProgress(percent);
+      });
       resetModal();
       setModalOpen(false);
       await loadVideos();
     } catch (err) {
       alert(`Failed to upload: ${err}`);
       setSaving(false);
+      setUploadProgress(0);
     }
   };
 
@@ -279,6 +286,17 @@ function StudioContent() {
             'Cache-Control': 'public, max-age=31536000, immutable',
           },
         });
+        const ext = thumbnail.name.split('.').pop()?.toLowerCase();
+        if (ext) {
+          try {
+            await processThumbnail(
+              editingVideo.id,
+              `thumbnails/${editingVideo.id}.${ext}`,
+            );
+          } catch (err) {
+            console.warn('processThumbnail failed (non-fatal):', err);
+          }
+        }
       }
 
       resetModal();
@@ -345,9 +363,7 @@ function StudioContent() {
 
         {videos.map((v) => {
           const date = parseUploadDate(v.id);
-          const thumb = v.thumbnailUrl && v.thumbnailUrl.length > 0
-            ? v.thumbnailUrl
-            : '/images/thumbnails/thumbnail.png';
+          const thumb = v.thumbnailSmallUrl ?? '/images/thumbnails/thumbnail.png';
           const isProcessed = v.status === 'processed';
           return (
             <div key={v.id} className={styles.tableRow}>
@@ -465,9 +481,25 @@ function StudioContent() {
                   <button type="button" className={styles.cancelButton} onClick={closeModal} disabled={saving}>
                     Cancel
                   </button>
-                  <button type="button" className={styles.publishButton} onClick={handlePublish} disabled={!canPublish}>
-                    {saving ? 'Publishing…' : 'Publish'}
-                  </button>
+                  {saving ? (
+                    <div className={styles.progressWrap}>
+                      <div className={styles.progressBar}>
+                        <div
+                          className={styles.progressFill}
+                          style={{ width: `${uploadProgress}%` }}
+                        />
+                      </div>
+                      <span className={styles.progressLabel}>
+                        {uploadProgress < 100
+                          ? `Uploading… ${uploadProgress}%`
+                          : 'Processing…'}
+                      </span>
+                    </div>
+                  ) : (
+                    <button type="button" className={styles.publishButton} onClick={handlePublish} disabled={!canPublish}>
+                      Publish
+                    </button>
+                  )}
                 </div>
               </>
             )}

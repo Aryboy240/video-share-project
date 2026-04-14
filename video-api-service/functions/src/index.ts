@@ -5,6 +5,9 @@ import {getAuth} from "firebase-admin/auth";
 import * as logger from "firebase-functions/logger";
 import {Storage} from "@google-cloud/storage";
 import {onCall} from "firebase-functions/v2/https";
+import sharp from "sharp";
+import * as https from "https";
+import * as http from "http";
 
 initializeApp();
 
@@ -16,20 +19,146 @@ const allowedThumbnailExtensions = new Set([
   "jpg", "jpeg", "png", "webp", "gif",
 ]);
 
+/**
+ * Fetches an image from a URL and returns the raw buffer.
+ * Follows redirects automatically.
+ */
+function fetchImageBuffer(url: string): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const protocol = url.startsWith("https") ? https : http;
+    const req = protocol.get(url, (res) => {
+      if (
+        res.statusCode &&
+        res.statusCode >= 300 &&
+        res.statusCode < 400 &&
+        res.headers.location
+      ) {
+        // Follow one redirect
+        fetchImageBuffer(res.headers.location).then(resolve).catch(reject);
+        return;
+      }
+      if (!res.statusCode || res.statusCode < 200 || res.statusCode >= 300) {
+        reject(new Error(`HTTP ${res.statusCode} fetching avatar`));
+        return;
+      }
+      const chunks: Buffer[] = [];
+      res.on("data", (chunk: Buffer) => chunks.push(chunk));
+      res.on("end", () => resolve(Buffer.concat(chunks)));
+      res.on("error", reject);
+    });
+    req.on("error", reject);
+    req.end();
+  });
+}
+
+/**
+ * Mirrors a Google profile photo to GCS and returns the public GCS URL.
+ * Falls back to the original URL if anything fails.
+ */
+async function mirrorAvatarToGcs(
+  uid: string,
+  sourceUrl: string
+): Promise<string> {
+  try {
+    const imgBuffer = await fetchImageBuffer(sourceUrl);
+    const jpegBuffer = await sharp(imgBuffer)
+      .resize(256, 256, {fit: "cover"})
+      .jpeg({quality: 90})
+      .toBuffer();
+    const bucket = storage.bucket(processedVideoBucketName);
+    const dest = `avatars/${uid}.jpg`;
+    await bucket.file(dest).save(jpegBuffer, {
+      metadata: {
+        contentType: "image/jpeg",
+        cacheControl: "public, max-age=86400",
+      },
+    });
+    await bucket.file(dest).makePublic();
+    return `https://storage.googleapis.com/${processedVideoBucketName}/${dest}`;
+  } catch (err) {
+    logger.warn(`mirrorAvatarToGcs failed for ${uid}, using original`, err);
+    return sourceUrl;
+  }
+}
+
 export const createUser = functions
   .region("europe-west2")
   .auth.user()
   .onCreate(async (user) => {
+    let photoUrl: string | undefined = user.photoURL ?? undefined;
+    if (photoUrl) {
+      photoUrl = await mirrorAvatarToGcs(user.uid, photoUrl);
+    }
     const userInfo = {
       uid: user.uid,
       email: user.email,
-      photoUrl: user.photoURL,
+      photoUrl: photoUrl ?? null,
       displayName: user.displayName ?? user.email?.split("@")[0] ?? "User",
     };
     await firestore.collection("users").doc(user.uid).set(userInfo);
     logger.info(`User Created: ${JSON.stringify(userInfo)}`);
     return;
   });
+
+export const refreshUserAvatar = onCall(
+  {maxInstances: 1, region: "europe-west2"},
+  async (request) => {
+    if (!request.auth) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "Must be authenticated."
+      );
+    }
+    const uid = request.auth.uid;
+    const authUser = await getAuth().getUser(uid);
+    const sourceUrl = authUser.photoURL;
+    if (!sourceUrl) {
+      return {photoUrl: null};
+    }
+    const photoUrl = await mirrorAvatarToGcs(uid, sourceUrl);
+    await firestore.collection("users").doc(uid).set(
+      {photoUrl},
+      {merge: true}
+    );
+    return {photoUrl};
+  }
+);
+
+export const backfillUserAvatars = onCall(
+  {maxInstances: 1, region: "europe-west2"},
+  async (request) => {
+    if (!request.auth) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "Must be authenticated."
+      );
+    }
+    await requireAdmin(request.auth.uid);
+    const snap = await firestore.collection("users").get();
+    let updated = 0;
+    await Promise.all(snap.docs.map(async (doc) => {
+      const data = doc.data();
+      const url: string | undefined = data.photoUrl;
+      if (
+        !url ||
+        !(
+          url.includes("lh3.googleusercontent.com") ||
+          url.includes("googleusercontent.com")
+        )
+      ) return;
+      try {
+        const gcsUrl = await mirrorAvatarToGcs(doc.id, url);
+        if (gcsUrl !== url) {
+          await doc.ref.set({photoUrl: gcsUrl}, {merge: true});
+          updated++;
+        }
+      } catch (err) {
+        logger.warn(`backfillUserAvatars: failed for ${doc.id}`, err);
+      }
+    }));
+    return {updated};
+  }
+);
 
 const videoCollectionId = "videos";
 
@@ -114,9 +243,6 @@ export const generateUploadUrl = onCall(
       title: rawTitle,
       description: rawDescription,
     };
-    if (thumbnailUrl) {
-      firestoreDoc.thumbnailUrl = thumbnailUrl;
-    }
 
     await firestore
       .collection(videoCollectionId)
@@ -141,10 +267,110 @@ export interface Video {
   title?: string,
   description?: string,
   thumbnailUrl?: string,
+  thumbnailSmallUrl?: string,
+  thumbnailMediumUrl?: string,
   resolutions?: string[],
   hlsMasterUrl?: string,
   streamType?: string,
+  duration?: number,
 }
+
+async function generateThumbnailVariants(
+  thumbnailPath: string,
+  videoId: string
+): Promise<{smallUrl: string; mediumUrl: string}> {
+  const processedBucket = storage.bucket(processedVideoBucketName);
+  const [srcBuffer] = await processedBucket.file(thumbnailPath).download();
+  const [smallBuffer, mediumBuffer] = await Promise.all([
+    sharp(srcBuffer)
+      .resize(640, 360, {fit: "cover"})
+      .jpeg({quality: 80})
+      .toBuffer(),
+    sharp(srcBuffer)
+      .resize(1280, 720, {fit: "cover"})
+      .jpeg({quality: 85})
+      .toBuffer(),
+  ]);
+  const smallPath = `thumbnails/small/${videoId}.jpg`;
+  const mediumPath = `thumbnails/medium/${videoId}.jpg`;
+  const meta = {
+    contentType: "image/jpeg",
+    cacheControl: "public, max-age=31536000, immutable",
+  };
+  await Promise.all([
+    processedBucket.file(smallPath).save(smallBuffer, {metadata: meta}),
+    processedBucket.file(mediumPath).save(mediumBuffer, {metadata: meta}),
+  ]);
+  await Promise.all([
+    processedBucket.file(smallPath).makePublic(),
+    processedBucket.file(mediumPath).makePublic(),
+  ]);
+  const base = `https://storage.googleapis.com/${processedVideoBucketName}/`;
+  return {smallUrl: base + smallPath, mediumUrl: base + mediumPath};
+}
+
+export const processThumbnail = onCall(
+  {maxInstances: 1, region: "europe-west2"},
+  async (request) => {
+    if (!request.auth) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "The function must be called while authenticated."
+      );
+    }
+    const {videoId, thumbnailPath} = request.data;
+    if (typeof videoId !== "string" || !videoId) {
+      throw new functions.https.HttpsError(
+        "invalid-argument", "A videoId is required."
+      );
+    }
+    if (typeof thumbnailPath !== "string" || !thumbnailPath) {
+      throw new functions.https.HttpsError(
+        "invalid-argument", "A thumbnailPath is required."
+      );
+    }
+
+    // Verify ownership
+    const docRef = firestore.collection(videoCollectionId).doc(videoId);
+    const snap = await docRef.get();
+    if (!snap.exists) {
+      throw new functions.https.HttpsError("not-found", "Video not found.");
+    }
+    if (snap.data()?.uid !== request.auth.uid) {
+      throw new functions.https.HttpsError(
+        "permission-denied", "You can only process your own videos."
+      );
+    }
+
+    try {
+      const processedBucket = storage.bucket(processedVideoBucketName);
+      const {smallUrl, mediumUrl} = await generateThumbnailVariants(
+        thumbnailPath,
+        videoId
+      );
+      await docRef.set(
+        {thumbnailSmallUrl: smallUrl, thumbnailMediumUrl: mediumUrl},
+        {merge: true}
+      );
+      // Delete original after variants are safely generated and written
+      try {
+        await processedBucket.file(thumbnailPath).delete();
+      } catch (delErr) {
+        logger.warn("processThumbnail: could not delete original", delErr);
+      }
+      return {
+        success: true,
+        thumbnailSmallUrl: smallUrl,
+        thumbnailMediumUrl: mediumUrl,
+      };
+    } catch (err) {
+      logger.error("processThumbnail failed", err);
+      throw new functions.https.HttpsError(
+        "internal", "Failed to generate thumbnail variants."
+      );
+    }
+  }
+);
 
 export const getVideos = onCall(
   {maxInstances: 1, region: "europe-west2"},
@@ -175,6 +401,32 @@ export const getVideoById = onCall(
       .limit(1)
       .get();
     return snap.empty ? null : snap.docs[0].data();
+  }
+);
+
+export const getChannelVideos = onCall(
+  {maxInstances: 1, region: "europe-west2"},
+  async (request) => {
+    const uid = request.data?.uid;
+    if (typeof uid !== "string" || !uid) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "A uid is required."
+      );
+    }
+    const snap = await firestore
+      .collection(videoCollectionId)
+      .where("uid", "==", uid)
+      .get();
+    const docs = snap.docs
+      .map((d) => d.data())
+      .filter((v) => v.status === "processed");
+    docs.sort((a, b) => {
+      const ai = typeof a.id === "string" ? a.id : "";
+      const bi = typeof b.id === "string" ? b.id : "";
+      return bi.localeCompare(ai);
+    });
+    return docs;
   }
 );
 
@@ -310,7 +562,6 @@ export const updateVideoMetadata = onCall(
       thumbnailUrl =
         `https://storage.googleapis.com/${processedVideoBucketName}/` +
         thumbnailPath;
-      updates.thumbnailUrl = thumbnailUrl;
     }
 
     await docRef.set(updates, {merge: true});
@@ -702,14 +953,18 @@ export const deleteVideo = onCall(
 
     const processedBucket = storage.bucket(processedVideoBucketName);
 
-    // Delete all processed files by prefix (HLS segments, playlists,
-    // and legacy multi-res MP4s all share the {videoId}_ prefix)
-    const [prefixFiles] = await processedBucket.getFiles(
+    // New layout: HLS files live under {videoId}/...
+    // Legacy layout: flat {videoId}_... files in bucket root
+    const [folderFiles] = await processedBucket.getFiles(
+      {prefix: `${videoId}/`}
+    );
+    const [legacyFiles] = await processedBucket.getFiles(
       {prefix: `${videoId}_`}
     );
-    if (prefixFiles.length > 0) {
+    const allFiles = [...folderFiles, ...legacyFiles];
+    if (allFiles.length > 0) {
       await Promise.all(
-        prefixFiles.map(async (file) => {
+        allFiles.map(async (file) => {
           try {
             await file.delete();
           } catch (err) {
@@ -861,12 +1116,16 @@ export const adminDeleteVideo = onCall(
     const video = snapshot.data() ?? {};
     const processedBucket = storage.bucket(processedVideoBucketName);
 
-    const [prefixFiles] = await processedBucket.getFiles(
+    const [folderFiles] = await processedBucket.getFiles(
+      {prefix: `${videoId}/`}
+    );
+    const [legacyFiles] = await processedBucket.getFiles(
       {prefix: `${videoId}_`}
     );
-    if (prefixFiles.length > 0) {
+    const allFiles = [...folderFiles, ...legacyFiles];
+    if (allFiles.length > 0) {
       await Promise.all(
-        prefixFiles.map(async (file) => {
+        allFiles.map(async (file) => {
           try {
             await file.delete();
           } catch (err) {

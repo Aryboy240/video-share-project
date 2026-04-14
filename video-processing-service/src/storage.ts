@@ -49,6 +49,22 @@ function getVideoHeight(rawVideoName: string): Promise<number> {
 }
 
 /**
+ * Probes a local file and returns its duration in seconds.
+ */
+export function getVideoDuration(filePath: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    ffmpeg.ffprobe(filePath, (err, metadata) => {
+      if (err) return reject(err);
+      const duration = metadata.format.duration;
+      if (typeof duration !== 'number' || !Number.isFinite(duration)) {
+        return reject(new Error('Could not determine video duration'));
+      }
+      resolve(Math.round(duration));
+    });
+  });
+}
+
+/**
  * Transcodes a raw video to HLS segments for a single resolution.
  */
 function transcodeResolutionToHLS(
@@ -67,8 +83,12 @@ function transcodeResolutionToHLS(
       .outputOptions('-c:v', 'libx264')
       .outputOptions('-crf', '23')
       .outputOptions('-preset', 'fast')
+      .outputOptions('-g', '144')
+      .outputOptions('-keyint_min', '144')
+      .outputOptions('-force_key_frames', 'expr:gte(t,n_forced*6)')
       .outputOptions('-c:a', 'aac')
       .outputOptions('-hls_time', '6')
+      .outputOptions('-hls_list_size', '0')
       .outputOptions('-hls_playlist_type', 'vod')
       .outputOptions('-hls_segment_filename', segmentPattern)
       .on('end', () => {
@@ -85,22 +105,27 @@ function transcodeResolutionToHLS(
 
 /**
  * Uploads an HLS file (.m3u8 or .ts) with the correct Content-Type.
+ * Files are stored under a per-video folder: {videoId}/{fileName}.
  */
-async function uploadHlsFile(fileName: string): Promise<void> {
+async function uploadHlsFile(
+  fileName: string,
+  videoId: string,
+): Promise<void> {
   const ext = fileName.split('.').pop()?.toLowerCase();
   const contentType =
     ext === 'm3u8' ? 'application/x-mpegURL' : 'video/MP2T';
 
+  const destination = `${videoId}/${fileName}`;
   const bucket = storage.bucket(processedVideoBucketName);
   await bucket.upload(`${localProcessedVideoPath}/${fileName}`, {
-    destination: fileName,
+    destination,
     metadata: {
       cacheControl: 'public, max-age=31536000, immutable',
       contentType,
     },
   });
-  await bucket.file(fileName).makePublic();
-  console.log(`Uploaded ${fileName} (${contentType})`);
+  await bucket.file(destination).makePublic();
+  console.log(`Uploaded ${destination} (${contentType})`);
 }
 
 /**
@@ -126,10 +151,13 @@ export async function transcodeToHLS(
     await transcodeResolutionToHLS(rawVideoName, videoId, label, height);
   }
 
-  // Generate master playlist referencing each variant stream
+  // Generate master playlist referencing each variant stream — lowest quality
+  // first so hls.js level 0 maps to the lowest resolution, enabling natural
+  // conservative start without requiring startLevel overrides.
   const masterFilename = `${videoId}_master.m3u8`;
+  const masterVariants = [...toProcess].reverse(); // ascending: 360p → 1080p
   let master = '#EXTM3U\n#EXT-X-VERSION:3\n';
-  for (const { label, width, height, bandwidth } of toProcess) {
+  for (const { label, width, height, bandwidth } of masterVariants) {
     master += `#EXT-X-STREAM-INF:BANDWIDTH=${bandwidth},`;
     master += `RESOLUTION=${width}x${height}\n`;
     master += `${videoId}_${label}.m3u8\n`;
@@ -145,7 +173,7 @@ export async function transcodeToHLS(
            (f.endsWith('.m3u8') || f.endsWith('.ts'))
   );
   for (const file of hlsFiles) {
-    await uploadHlsFile(file);
+    await uploadHlsFile(file, videoId);
   }
 
   // Clean up all local HLS files
@@ -153,7 +181,7 @@ export async function transcodeToHLS(
     await deleteProcessedVideo(file);
   }
 
-  return masterFilename;
+  return `${videoId}/${masterFilename}`;
 }
 
 
