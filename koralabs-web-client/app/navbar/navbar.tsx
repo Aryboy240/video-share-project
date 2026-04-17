@@ -9,6 +9,7 @@ import { onAuthStateChangedHelper } from "../firebase/firebase";
 import { useEffect, useState } from "react";
 import { User } from "@firebase/auth/cordova";
 import Upload from "./upload";
+import NotificationBell from "./notification-bell";
 
 export default function Navbar() {
     const [user, setUser] = useState<User | null>(null);
@@ -66,6 +67,7 @@ export default function Navbar() {
 
         <div className={styles.navRight}>
             {user && <Upload />}
+            {user && <NotificationBell uid={user.uid} />}
             <SignIn user={user} />
         </div>
     </nav>

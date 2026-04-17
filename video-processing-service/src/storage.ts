@@ -138,6 +138,7 @@ async function uploadHlsFile(
 export async function transcodeToHLS(
   rawVideoName: string,
   videoId: string,
+  onResolutionComplete?: (done: number, total: number) => Promise<void>,
 ): Promise<string> {
   const sourceHeight = await getVideoHeight(rawVideoName);
   console.log(`Source video height: ${sourceHeight}px`);
@@ -147,8 +148,12 @@ export async function transcodeToHLS(
   );
 
   // Transcode each resolution to HLS segments + per-resolution playlist
-  for (const { label, height } of toProcess) {
+  for (let i = 0; i < toProcess.length; i++) {
+    const { label, height } = toProcess[i];
     await transcodeResolutionToHLS(rawVideoName, videoId, label, height);
+    if (onResolutionComplete) {
+      await onResolutionComplete(i + 1, toProcess.length);
+    }
   }
 
   // Generate master playlist referencing each variant stream — lowest quality

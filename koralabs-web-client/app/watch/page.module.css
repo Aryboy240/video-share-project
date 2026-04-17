@@ -186,6 +186,56 @@
   color: #ff9800;
 }
 
+.shareButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background-color: #2a2a2a;
+  border: 1px solid #444;
+  color: #ccc;
+  padding: 5px 14px;
+  border-radius: 20px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.shareButton:hover {
+  background-color: #333;
+  border-color: #666;
+  color: #fff;
+}
+
+@keyframes toastFade {
+  0%   { opacity: 0; transform: translateX(-50%) translateY(8px); }
+  15%  { opacity: 1; transform: translateX(-50%) translateY(0); }
+  75%  { opacity: 1; transform: translateX(-50%) translateY(0); }
+  100% { opacity: 0; transform: translateX(-50%) translateY(8px); }
+}
+
+.toast {
+  position: fixed;
+  bottom: 32px;
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: #1e1e1e;
+  color: #fff;
+  border-left: 3px solid var(--primary-accent);
+  padding: 10px 20px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+  z-index: 999;
+  white-space: nowrap;
+  animation: toastFade 2s ease forwards;
+}
+
 .description {
   margin: 0 0 15px 0;
   color: #ccc;
@@ -542,8 +592,35 @@
 
 .commentCard {
   display: flex;
-  gap: 12px;
+  flex-direction: column;
+  gap: 8px;
   margin-bottom: 20px;
+}
+
+.commentCardPinned {
+  padding: 10px 12px;
+  border-radius: 8px;
+  border-left: 2px solid var(--primary-accent, #ff4500);
+  background: rgba(255, 69, 0, 0.05);
+}
+
+.pinnedBanner {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--primary-accent, #ff4500);
+  font-weight: 500;
+}
+
+.pinnedIcon {
+  font-size: 12px;
+  line-height: 1;
+}
+
+.commentCardInner {
+  display: flex;
+  gap: 12px;
 }
 
 .commentAvatar {
@@ -1106,4 +1183,371 @@
 .videoContainer:global(:-webkit-full-screen) .videoPlayer {
   height: 100vh;
   object-fit: contain;
+}
+
+/* ── Watch page tag pills ────────────────────────────────────────────────── */
+.watchTagRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.watchTag {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 99px;
+  border: 1px solid #333;
+  background: #1a1a1a;
+  color: #bbb;
+  font-size: 12px;
+  text-decoration: none;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+  white-space: nowrap;
+}
+
+.watchTag:hover {
+  border-color: var(--primary-accent, #ff4500);
+  color: #fff;
+  background: rgba(255, 69, 0, 0.08);
+}
+
+/* ── Chapter tick marks on progress bar ─────────────────────────────────── */
+.chapterTick {
+  position: absolute;
+  top: 0;
+  width: 2px;
+  height: 100%;
+  background-color: rgba(255, 255, 255, 0.6);
+  transform: translateX(-50%);
+  pointer-events: none;
+  z-index: 4;
+}
+
+/* ── Chapter list panel ──────────────────────────────────────────────────── */
+.chaptersPanel {
+  margin-bottom: 12px;
+  border: 1px solid #2a2a2a;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.chapterHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 14px;
+  background: #1a1a1a;
+  border: none;
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+}
+
+.chapterHeader:hover {
+  background: #222;
+}
+
+.chapterToggleIcon {
+  font-size: 12px;
+  color: #aaa;
+}
+
+.chapterCount {
+  margin-left: auto;
+  font-size: 12px;
+  color: #888;
+  font-weight: 400;
+}
+
+.chapterList {
+  display: flex;
+  flex-direction: column;
+}
+
+.chapterItem {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 14px;
+  background: transparent;
+  border: none;
+  border-top: 1px solid #222;
+  color: #ccc;
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s;
+}
+
+.chapterItem:hover {
+  background: #1e1e1e;
+  color: #fff;
+}
+
+.chapterItemActive {
+  background: #1e1e1e;
+  color: #ffffff;
+}
+
+.chapterItemActive .chapterTimestamp {
+  color: var(--accent, #ff4500);
+}
+
+.chapterTimestamp {
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  color: #888;
+  min-width: 38px;
+  flex-shrink: 0;
+}
+
+.chapterName {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Save-to-playlist dropdown ───────────────────────────────────────────── */
+.saveWrap {
+  position: relative;
+}
+
+.saveDropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  width: 260px;
+  background: #1e1e1e;
+  border: 1px solid #2a2a2a;
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  z-index: 100;
+  padding: 8px 0 4px;
+}
+
+.saveDropdownTitle {
+  margin: 0 0 4px;
+  padding: 0 12px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #888;
+  border-bottom: 1px solid #2a2a2a;
+}
+
+.savePlaylistItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  background: none;
+  border: none;
+  color: #e0e0e0;
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.1s;
+}
+
+.savePlaylistItem:hover { background: rgba(255,255,255,0.06); }
+.savePlaylistItem:disabled { opacity: 0.5; cursor: default; }
+
+.saveCheckbox {
+  font-size: 16px;
+  flex-shrink: 0;
+  color: var(--primary-accent, #1ac8e8);
+}
+
+.savePlaylistName {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.savePlaylistVis {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  flex-shrink: 0;
+  border-radius: 3px;
+  padding: 1px 5px;
+}
+
+.saveVisPublic {
+  background: #1a7a3c;
+  color: #fff;
+}
+
+.saveVisPrivate {
+  background: #7a1a1a;
+  color: #fff;
+}
+
+.visToggle {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.visToggleBtn {
+  flex: 1;
+  background: #2a2a2a;
+  border: 1px solid #333;
+  border-radius: 5px;
+  color: #888;
+  font-size: 11px;
+  padding: 4px 0;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+}
+
+.visToggleActive {
+  background: #1e3a2a;
+  border-color: #1a7a3c;
+  color: #4caf50;
+}
+
+.saveEmpty {
+  margin: 0;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: #666;
+}
+
+.newPlaylistBtn {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  background: none;
+  border: none;
+  border-top: 1px solid #2a2a2a;
+  color: var(--primary-accent, #1ac8e8);
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+  margin-top: 4px;
+  transition: opacity 0.1s;
+}
+
+.newPlaylistBtn:hover { opacity: 0.8; }
+
+.newPlaylistForm {
+  padding: 8px 12px;
+  border-top: 1px solid #2a2a2a;
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.newPlaylistInput {
+  background: #111;
+  border: 1px solid #333;
+  border-radius: 6px;
+  color: #fff;
+  font-size: 13px;
+  padding: 6px 8px;
+  outline: none;
+}
+
+.newPlaylistInput:focus { border-color: var(--primary-accent, #1ac8e8); }
+
+.newPlaylistActions {
+  display: flex;
+  gap: 6px;
+}
+
+.newPlaylistCreate {
+  flex: 1;
+  background: var(--primary-accent, #1ac8e8);
+  color: #000;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 8px;
+  cursor: pointer;
+}
+
+.newPlaylistCreate:disabled { opacity: 0.5; cursor: default; }
+
+.newPlaylistCancel {
+  background: #2a2a2a;
+  color: #ccc;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  padding: 5px 8px;
+  cursor: pointer;
+}
+
+/* ── Playlist sidebar panel ──────────────────────────────────────────────── */
+.playlistSidebarHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.playlistVisBadge {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  background: #2a2a2a;
+  color: #888;
+  border-radius: 4px;
+  padding: 2px 6px;
+  flex-shrink: 0;
+}
+
+.playlistNav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  gap: 8px;
+}
+
+.playlistNavBtn {
+  background: #2a2a2a;
+  color: #ccc;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  padding: 5px 10px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.playlistNavBtn:hover:not(:disabled) { background: #3a3a3a; color: #fff; }
+.playlistNavBtn:disabled { opacity: 0.35; cursor: default; }
+
+.playlistNavPos {
+  font-size: 12px;
+  color: #888;
+}
+
+.playlistSidebarList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.playlistItemActive {
+  background: rgba(255,255,255,0.06) !important;
+  border-radius: 8px;
+}
+
+.playlistItemNum {
+  font-size: 12px;
+  color: #666;
+  min-width: 18px;
+  text-align: right;
+  flex-shrink: 0;
 }

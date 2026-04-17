@@ -168,9 +168,54 @@
   white-space: nowrap;
 }
 
+.categoryRow {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  scrollbar-width: none;
+}
+
+.categoryRow::-webkit-scrollbar {
+  display: none;
+}
+
+.categoryPill {
+  flex-shrink: 0;
+  padding: 6px 14px;
+  border-radius: 99px;
+  border: 1px solid #333;
+  background: #1a1a1a;
+  color: #ccc;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.categoryPill:hover {
+  background: #252525;
+  border-color: #555;
+  color: #fff;
+}
+
+.categoryPillActive {
+  background: var(--primary-accent, #ff4500);
+  border-color: var(--primary-accent, #ff4500);
+  color: #fff;
+}
+
+.categoryPillActive:hover {
+  background: var(--primary-accent, #ff4500);
+  border-color: var(--primary-accent, #ff4500);
+  opacity: 0.9;
+}
+
 .searchHeader {
-  margin: 0 0 16px;
-  font-size: 16px;
+  margin: 12px 0 4px;
+  font-size: 15px;
   color: #ccc;
   font-weight: 400;
 }

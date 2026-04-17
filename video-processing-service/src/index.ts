@@ -9,7 +9,7 @@ import {
   setupDirectories
 } from './storage';
 
-import { isVideoNew, setVideo } from "./firestore";
+import { isVideoNew, setVideo, updateVideoProgress } from "./firestore";
 
 // Create the local directories for videos
 setupDirectories();
@@ -43,16 +43,26 @@ app.post('/process-video', async (req, res) => {
       id: videoId,
       uid: videoId.split('-')[0],
       status: 'processing',
+      progress: 0,
+      processingStage: 'downloading',
     });
   }
 
   // Download the raw video from Cloud Storage
   await downloadRawVideo(inputFileName);
+  await updateVideoProgress(videoId, 10, 'transcoding');
 
   // Transcode into HLS adaptive streams
   let masterFilename: string;
   try {
-    masterFilename = await transcodeToHLS(inputFileName, videoId);
+    masterFilename = await transcodeToHLS(
+      inputFileName,
+      videoId,
+      async (done, total) => {
+        const progress = Math.round(10 + (75 * done) / total);
+        await updateVideoProgress(videoId, progress, 'transcoding');
+      },
+    );
   } catch (err) {
     await deleteRawVideo(inputFileName);
     return res.status(500).send('Processing failed');
@@ -73,6 +83,8 @@ app.post('/process-video', async (req, res) => {
     filename: videoId,  // used as the watch URL param for HLS videos
     hlsMasterUrl,
     streamType: 'hls',
+    progress: 100,
+    processingStage: 'complete',
     ...(duration !== undefined ? { duration } : {}),
   });
 

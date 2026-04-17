@@ -8,7 +8,8 @@ import { User as FirebaseAuthUser } from 'firebase/auth';
 import { onAuthStateChangedHelper } from '../../firebase/firebase';
 import {
   getUserById, getChannelVideos, toggleSubscription, getSubscriptionStatus,
-  formatUploader, User, Video,
+  getPublicUserPlaylists,
+  formatUploader, User, Video, Playlist,
 } from '../../firebase/functions';
 import styles from './page.module.css';
 
@@ -64,6 +65,7 @@ export default function ChannelPage() {
   const [subscriberCount, setSubscriberCount] = useState(0);
   const [togglingSub, setTogglingSub] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [playlists, setPlaylists] = useState<Playlist[]>([]);
 
   useEffect(() => {
     const unsub = onAuthStateChangedHelper((user) => setCurrentUser(user));
@@ -76,10 +78,12 @@ export default function ChannelPage() {
     Promise.all([
       getUserById(uid).catch(() => null),
       getChannelVideos(uid).catch(() => [] as Video[]),
-    ]).then(([user, vids]) => {
+      getPublicUserPlaylists(uid).catch(() => [] as Playlist[]),
+    ]).then(([user, vids, pls]) => {
       setChannelUser(user);
       setSubscriberCount(user?.subscriberCount ?? 0);
       setVideos(vids);
+      setPlaylists(pls);
     }).finally(() => setLoading(false));
   }, [uid]);
 
@@ -203,6 +207,24 @@ export default function ChannelPage() {
           </div>
         )}
       </div>
+
+      {playlists.length > 0 && (
+        <div className={styles.playlistsSection}>
+          <h2 className={styles.sectionHeading}>Playlists</h2>
+          <div className={styles.playlistGrid}>
+            {playlists.map((pl) => (
+              <Link key={pl.id} href={`/playlist/${pl.id}`} className={styles.playlistCard}>
+                <div className={styles.playlistCardThumb}>
+                  <span className={styles.playlistCount}>{pl.videoIds.length} videos</span>
+                </div>
+                <div className={styles.playlistCardInfo}>
+                  <p className={styles.playlistCardTitle}>{pl.title}</p>
+                </div>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

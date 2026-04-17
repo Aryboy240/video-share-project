@@ -1,13 +1,18 @@
 'use client';
 
 import { useState, useEffect, Suspense } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 import Image from 'next/image';
 import Link from 'next/link';
 import { getVideos, getUserById, formatUploader, User, Video } from './firebase/functions';
 import { onAuthStateChangedHelper } from './firebase/firebase';
 import { User as FirebaseAuthUser } from 'firebase/auth';
 import styles from './page.module.css';
+
+const CATEGORIES = [
+  'All', 'Gaming', 'Music', 'Education', 'Technology',
+  'Entertainment', 'Sports', 'News', 'Comedy', 'Other',
+] as const;
 
 function formatViewCount(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, '')}M views`;
@@ -129,7 +134,12 @@ function VideoCard({ video, userMap }: { video: Video; userMap: Map<string, User
 
 function HomeContent() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const query = searchParams.get('search')?.trim() ?? '';
+  const rawCategory = searchParams.get('category')?.trim() ?? '';
+  const activeCategory = (CATEGORIES as readonly string[]).find(
+    (c) => c !== 'All' && c.toLowerCase() === rawCategory.toLowerCase()
+  ) ?? 'All';
 
   const [allVideos, setAllVideos] = useState<Video[]>([]);
   const [userMap, setUserMap] = useState<Map<string, User | null>>(new Map());
@@ -170,21 +180,46 @@ function HomeContent() {
     return () => { cancelled = true; };
   }, []);
 
-  const filteredVideos = query
-    ? allVideos.filter((v) => {
-        const q = query.toLowerCase();
-        return (
-          (v.title ?? '').toLowerCase().includes(q) ||
-          (v.uid ?? '').toLowerCase().includes(q)
-        );
-      })
-    : allVideos;
+  const filteredVideos = allVideos.filter((v) => {
+    const matchesQuery = !query || (
+      (v.title ?? '').toLowerCase().includes(query.toLowerCase()) ||
+      (v.uid ?? '').toLowerCase().includes(query.toLowerCase())
+    );
+    const matchesCategory = activeCategory === 'All' ||
+      (v.tags ?? []).some((t) => t.toLowerCase() === activeCategory.toLowerCase());
+    return matchesQuery && matchesCategory;
+  });
+
+  const handleCategoryClick = (cat: string) => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (cat === 'All') {
+      params.delete('category');
+    } else {
+      params.set('category', cat);
+    }
+    const qs = params.toString();
+    router.push(qs ? `/?${qs}` : '/');
+  };
 
   return (
     <main className={styles.main}>
-      {query && (
+      <div className={styles.categoryRow}>
+        {CATEGORIES.map((cat) => (
+          <button
+            key={cat}
+            type="button"
+            className={`${styles.categoryPill}${activeCategory === cat ? ' ' + styles.categoryPillActive : ''}`}
+            onClick={() => handleCategoryClick(cat)}
+          >
+            {cat}
+          </button>
+        ))}
+      </div>
+      {(query || activeCategory !== 'All') && (
         <p className={styles.searchHeader}>
-          Results for <strong>&lsquo;{query}&rsquo;</strong>
+          {query && <>Results for <strong>&lsquo;{query}&rsquo;</strong></>}
+          {query && activeCategory !== 'All' && <> in </>}
+          {activeCategory !== 'All' && <strong>{activeCategory}</strong>}
         </p>
       )}
       {loading ? (

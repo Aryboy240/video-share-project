@@ -11,7 +11,11 @@ import {
   deleteVideo,
   updateVideoMetadata,
   processThumbnail,
+  getUserPlaylists,
+  createPlaylist,
+  deletePlaylist,
   Video,
+  Playlist,
 } from '../firebase/functions';
 import { onAuthStateChangedHelper } from '../firebase/firebase';
 
@@ -37,6 +41,7 @@ function StudioContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const editParam = searchParams.get('edit');
+  const tabParam = searchParams.get('tab');
 
   const [currentUser, setCurrentUser] = useState<FirebaseAuthUser | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
@@ -58,6 +63,17 @@ function StudioContent() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [dragOver, setDragOver] = useState(false);
   const [thumbnailError, setThumbnailError] = useState<string | null>(null);
+  const [tags, setTags] = useState<string[]>([]);
+  const [tagInput, setTagInput] = useState('');
+
+  // Tab + playlist state
+  const [activeTab, setActiveTab] = useState<'videos' | 'playlists'>('videos');
+  const [playlists, setPlaylists] = useState<Playlist[]>([]);
+  const [loadingPlaylists, setLoadingPlaylists] = useState(false);
+  const [deletingPlaylistId, setDeletingPlaylistId] = useState<string | null>(null);
+  const [newPlTitle, setNewPlTitle] = useState('');
+  const [newPlVis, setNewPlVis] = useState<'public' | 'private'>('public');
+  const [creatingPl, setCreatingPl] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const thumbnailInputRef = useRef<HTMLInputElement>(null);
@@ -76,6 +92,10 @@ function StudioContent() {
       router.push('/');
     }
   }, [authChecked, currentUser, router]);
+
+  useEffect(() => {
+    if (tabParam === 'playlists') setActiveTab('playlists');
+  }, [tabParam]);
 
   const loadVideos = useCallback(async () => {
     if (!currentUser) return;
@@ -96,6 +116,57 @@ function StudioContent() {
     }
   }, [currentUser, loadVideos]);
 
+  const loadPlaylists = useCallback(async () => {
+    if (!currentUser) return;
+    setLoadingPlaylists(true);
+    try {
+      const pls = await getUserPlaylists();
+      setPlaylists(pls);
+    } catch { /* silent */ } finally {
+      setLoadingPlaylists(false);
+    }
+  }, [currentUser]);
+
+  useEffect(() => {
+    if (currentUser && activeTab === 'playlists') {
+      loadPlaylists();
+    }
+  }, [currentUser, activeTab, loadPlaylists]);
+
+  // Poll every 5 s while any video is still processing
+  const hasProcessingVideos = videos.some((v) => v.status === 'processing');
+  useEffect(() => {
+    if (!currentUser || !hasProcessingVideos) return;
+    const id = setInterval(() => {
+      getUserVideos().then(setVideos).catch(() => {});
+    }, 5000);
+    return () => clearInterval(id);
+  }, [currentUser, hasProcessingVideos]);
+
+  const handleCreatePlaylist = async () => {
+    const title = newPlTitle.trim();
+    if (!title || creatingPl) return;
+    setCreatingPl(true);
+    try {
+      await createPlaylist(title, '', newPlVis);
+      setNewPlTitle('');
+      await loadPlaylists();
+    } catch { /* silent */ } finally {
+      setCreatingPl(false);
+    }
+  };
+
+  const handleDeletePlaylist = async (playlistId: string) => {
+    if (deletingPlaylistId) return;
+    setDeletingPlaylistId(playlistId);
+    try {
+      await deletePlaylist(playlistId);
+      setPlaylists((prev) => prev.filter((p) => p.id !== playlistId));
+    } catch { /* silent */ } finally {
+      setDeletingPlaylistId(null);
+    }
+  };
+
   // Open edit modal when ?edit param is present and videos are loaded
   const openEditModal = useCallback((video: Video) => {
     // Reset everything first
@@ -110,6 +181,8 @@ function StudioContent() {
     setSaving(false);
     setDragOver(false);
     setThumbnailError(null);
+    setTags(video.tags ?? []);
+    setTagInput('');
     if (fileInputRef.current) fileInputRef.current.value = '';
     if (thumbnailInputRef.current) thumbnailInputRef.current.value = '';
     setModalOpen(true);
@@ -178,6 +251,8 @@ function StudioContent() {
     setDragOver(false);
     setThumbnailError(null);
     setUploadProgress(0);
+    setTags([]);
+    setTagInput('');
     if (fileInputRef.current) fileInputRef.current.value = '';
     if (thumbnailInputRef.current) thumbnailInputRef.current.value = '';
   };
@@ -241,6 +316,24 @@ function StudioContent() {
     if (thumbnailInputRef.current) thumbnailInputRef.current.value = '';
   };
 
+  const addTag = (raw: string) => {
+    const tag = raw.trim().replace(/,/g, '').slice(0, 30);
+    if (!tag) { setTagInput(''); return; }
+    if (tags.length >= 10) { setTagInput(''); return; }
+    if (tags.some((t) => t.toLowerCase() === tag.toLowerCase())) { setTagInput(''); return; }
+    setTags((prev) => [...prev, tag]);
+    setTagInput('');
+  };
+
+  const handleTagKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault();
+      addTag(tagInput);
+    } else if (e.key === 'Backspace' && tagInput === '' && tags.length > 0) {
+      setTags((prev) => prev.slice(0, -1));
+    }
+  };
+
   const canSave = title.trim().length > 0 && !saving;
   const canPublish = !!file && title.trim().length > 0 && !saving;
 
@@ -251,7 +344,7 @@ function StudioContent() {
     try {
       await uploadVideo(file, title.trim(), description.trim(), thumbnail, (percent) => {
         setUploadProgress(percent);
-      });
+      }, tags);
       resetModal();
       setModalOpen(false);
       await loadVideos();
@@ -275,6 +368,7 @@ function StudioContent() {
         title.trim(),
         description.trim(),
         thumbnailExtension,
+        tags,
       );
 
       if (thumbnail && result.thumbnailUploadUrl) {
@@ -342,6 +436,81 @@ function StudioContent() {
         </button>
       </div>
 
+      <div className={styles.tabBar}>
+        <button
+          type="button"
+          className={`${styles.tabBtn} ${activeTab === 'videos' ? styles.tabBtnActive : ''}`}
+          onClick={() => setActiveTab('videos')}
+        >Videos</button>
+        <button
+          type="button"
+          className={`${styles.tabBtn} ${activeTab === 'playlists' ? styles.tabBtnActive : ''}`}
+          onClick={() => setActiveTab('playlists')}
+        >Playlists</button>
+      </div>
+
+      {activeTab === 'playlists' && (
+        <div className={styles.playlistsTab}>
+          <div className={styles.newPlaylistRow}>
+            <input
+              type="text"
+              className={styles.newPlaylistInput}
+              placeholder="New playlist title…"
+              value={newPlTitle}
+              onChange={(e) => setNewPlTitle(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleCreatePlaylist(); }}
+            />
+            <select
+              className={styles.newPlaylistSelect}
+              value={newPlVis}
+              onChange={(e) => setNewPlVis(e.target.value as 'public' | 'private')}
+            >
+              <option value="public">Public</option>
+              <option value="private">Private</option>
+            </select>
+            <button
+              type="button"
+              className={styles.uploadCta}
+              onClick={handleCreatePlaylist}
+              disabled={creatingPl || !newPlTitle.trim()}
+            >{creatingPl ? 'Creating…' : 'Create playlist'}</button>
+          </div>
+
+          {loadingPlaylists && playlists.length === 0 && (
+            <p className={styles.emptyRow}>Loading playlists…</p>
+          )}
+          {!loadingPlaylists && playlists.length === 0 && (
+            <p className={styles.emptyRow}>No playlists yet.</p>
+          )}
+
+          <div className={styles.playlistGrid}>
+            {playlists.map((pl) => (
+              <div key={pl.id} className={styles.playlistCard}>
+                <Link href={`/playlist/${pl.id}`} className={styles.playlistCardLink}>
+                  <div className={styles.playlistCardThumb}>
+                    <span className={styles.playlistVideoCount}>{pl.videoIds.length} videos</span>
+                  </div>
+                  <div className={styles.playlistCardBody}>
+                    <p className={styles.playlistCardTitle}>{pl.title}</p>
+                    <span className={`${styles.playlistCardVis} ${pl.visibility === 'private' ? styles.visPrivate : styles.visPublic}`}>
+                      {pl.visibility}
+                    </span>
+                  </div>
+                </Link>
+                <button
+                  type="button"
+                  className={styles.deleteBtn}
+                  onClick={() => handleDeletePlaylist(pl.id)}
+                  disabled={deletingPlaylistId === pl.id}
+                  title="Delete playlist"
+                >{deletingPlaylistId === pl.id ? '…' : '🗑'}</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'videos' && (
       <div className={styles.tableWrap}>
         <div className={styles.tableHeader}>
           <div className={styles.colVideo}>Video</div>
@@ -384,9 +553,23 @@ function StudioContent() {
                 </div>
               </div>
               <div className={styles.colStatus}>
-                <span className={`${styles.statusBadge} ${isProcessed ? styles.statusProcessed : styles.statusProcessing}`}>
-                  {isProcessed ? 'Processed' : 'Processing'}
-                </span>
+                {isProcessed ? (
+                  <span className={`${styles.statusBadge} ${styles.statusProcessed}`}>Processed</span>
+                ) : (
+                  <div className={styles.processingStatus}>
+                    <div className={styles.progressBarWrap}>
+                      <div
+                        className={styles.progressBar}
+                        style={{ width: `${v.progress ?? 0}%` }}
+                      />
+                    </div>
+                    <span className={styles.progressLabel}>
+                      {v.processingStage === 'downloading' ? 'Downloading…' :
+                       v.processingStage === 'transcoding' ? `Transcoding ${v.progress ?? 0}%` :
+                       `Processing ${v.progress ?? 0}%`}
+                    </span>
+                  </div>
+                )}
               </div>
               <div className={styles.colDate}>{formatDate(date)}</div>
               <div className={styles.colLikes}>
@@ -426,6 +609,7 @@ function StudioContent() {
           );
         })}
       </div>
+      )}
 
       {modalOpen && (
         <div className={styles.modalOverlay} onClick={closeModal}>
@@ -558,6 +742,40 @@ function StudioContent() {
           disabled={saving}
         />
         <div className={styles.charCount}>{description.length}/500</div>
+        <p className={styles.chapterHint}>
+          Add chapters by starting lines with a timestamp (e.g. <code>0:00 Intro</code>, <code>1:30 Main topic</code>).
+          The first chapter must start at 0:00 and you need at least 2 chapters.
+        </p>
+
+        <label className={styles.fieldLabel}>Tags</label>
+        <div className={styles.tagInputWrap}>
+          {tags.map((tag) => (
+            <span key={tag} className={styles.tagPill}>
+              {tag}
+              <button
+                type="button"
+                className={styles.tagRemove}
+                onClick={() => setTags((prev) => prev.filter((t) => t !== tag))}
+                disabled={saving}
+                aria-label={`Remove tag ${tag}`}
+              >✕</button>
+            </span>
+          ))}
+          {tags.length < 10 && (
+            <input
+              className={styles.tagInput}
+              type="text"
+              value={tagInput}
+              placeholder={tags.length === 0 ? 'Add tags (Enter or comma)' : 'Add another…'}
+              maxLength={31}
+              disabled={saving}
+              onChange={(e) => setTagInput(e.target.value)}
+              onKeyDown={handleTagKeyDown}
+              onBlur={() => addTag(tagInput)}
+            />
+          )}
+        </div>
+        <p className={styles.tagHint}>Up to 10 tags · max 30 characters each</p>
 
         <label className={styles.fieldLabel} htmlFor="studio-thumbnail">
           Thumbnail

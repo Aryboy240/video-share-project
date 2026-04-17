@@ -64,6 +64,12 @@ export default function SignIn({ user }: SignInProps) {
                     </button>
                     <button
                         className={styles.dropdownItem}
+                        onClick={() => { setOpen(false); router.push('/history'); }}
+                    >
+                        History
+                    </button>
+                    <button
+                        className={styles.dropdownItem}
                         onClick={() => { setOpen(false); router.push('/studio'); }}
                     >
                         Studio

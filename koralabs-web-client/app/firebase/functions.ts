@@ -25,6 +25,22 @@ const getChannelVideosFunction = httpsCallable(functions, 'getChannelVideos');
 const processThumbnailFunction = httpsCallable(functions, 'processThumbnail');
 const refreshUserAvatarFunction = httpsCallable(functions, 'refreshUserAvatar');
 const backfillUserAvatarsFunction = httpsCallable(functions, 'backfillUserAvatars');
+const recordWatchHistoryFunction = httpsCallable(functions, 'recordWatchHistory');
+const getWatchHistoryFunction = httpsCallable(functions, 'getWatchHistory');
+const clearWatchHistoryFunction = httpsCallable(functions, 'clearWatchHistory');
+const pinCommentFunction = httpsCallable(functions, 'pinComment');
+const unpinCommentFunction = httpsCallable(functions, 'unpinComment');
+const getNotificationsFunction = httpsCallable(functions, 'getNotifications');
+const markNotificationsReadFunction = httpsCallable(functions, 'markNotificationsRead');
+const createPlaylistFunction = httpsCallable(functions, 'createPlaylist');
+const getPlaylistFunction = httpsCallable(functions, 'getPlaylist');
+const getUserPlaylistsFunction = httpsCallable(functions, 'getUserPlaylists');
+const getPublicUserPlaylistsFunction = httpsCallable(functions, 'getPublicUserPlaylists');
+const addToPlaylistFunction = httpsCallable(functions, 'addToPlaylist');
+const removeFromPlaylistFunction = httpsCallable(functions, 'removeFromPlaylist');
+const deletePlaylistFunction = httpsCallable(functions, 'deletePlaylist');
+const reorderPlaylistFunction = httpsCallable(functions, 'reorderPlaylist');
+const updatePlaylistVisibilityFunction = httpsCallable(functions, 'updatePlaylistVisibility');
 
 export async function uploadVideo(
   file: File,
@@ -32,6 +48,7 @@ export async function uploadVideo(
   description: string,
   thumbnail?: File | null,
   onProgress?: (percent: number) => void,
+  tags?: string[],
 ) {
   const thumbnailExtension = thumbnail
     ? thumbnail.name.split('.').pop()?.toLowerCase()
@@ -42,6 +59,7 @@ export async function uploadVideo(
     title,
     description,
     ...(thumbnailExtension ? { thumbnailExtension } : {}),
+    ...(tags && tags.length > 0 ? { tags } : {}),
   });
 
   // Upload the video file via XHR so we can track progress
@@ -105,6 +123,7 @@ export interface Video {
   status?: 'processing' | 'processed',
   title?: string,
   description?: string,
+  tags?: string[],
   thumbnailUrl?: string,
   thumbnailSmallUrl?: string,
   thumbnailMediumUrl?: string,
@@ -116,6 +135,8 @@ export interface Video {
   hlsMasterUrl?: string,
   streamType?: string,
   duration?: number,
+  progress?: number,
+  processingStage?: string,
 }
 
 export interface Comment {
@@ -123,6 +144,7 @@ export interface Comment {
   uid: string,
   text: string,
   createdAt: string | null,
+  pinned?: boolean,
 }
 
 export async function getVideos() {
@@ -167,12 +189,14 @@ export async function updateVideoMetadata(
   title: string,
   description: string,
   thumbnailExtension?: string,
+  tags?: string[],
 ): Promise<{ success: boolean; thumbnailUploadUrl?: string | null; thumbnailUrl?: string | null }> {
   const response: any = await updateVideoMetadataFunction({
     videoId,
     title,
     description,
     ...(thumbnailExtension ? { thumbnailExtension } : {}),
+    ...(tags !== undefined ? { tags } : {}),
   });
   return response.data;
 }
@@ -264,4 +288,132 @@ export async function refreshUserAvatar(): Promise<{ photoUrl: string | null }> 
 export async function backfillUserAvatars(): Promise<{ updated: number }> {
   const response: any = await backfillUserAvatarsFunction();
   return response.data as { updated: number };
+}
+
+export interface VideoWithWatchedAt extends Video {
+  watchedAt?: string | null;
+}
+
+export async function recordWatchHistory(videoId: string): Promise<{ success: boolean }> {
+  const response: any = await recordWatchHistoryFunction({ videoId });
+  return response.data as { success: boolean };
+}
+
+export async function getWatchHistory(): Promise<VideoWithWatchedAt[]> {
+  const response: any = await getWatchHistoryFunction();
+  return response.data as VideoWithWatchedAt[];
+}
+
+export async function clearWatchHistory(): Promise<{ deleted: number }> {
+  const response: any = await clearWatchHistoryFunction();
+  return response.data as { deleted: number };
+}
+
+export async function pinComment(videoId: string, commentId: string): Promise<{ success: boolean }> {
+  const response: any = await pinCommentFunction({ videoId, commentId });
+  return response.data as { success: boolean };
+}
+
+export async function unpinComment(videoId: string, commentId: string): Promise<{ success: boolean }> {
+  const response: any = await unpinCommentFunction({ videoId, commentId });
+  return response.data as { success: boolean };
+}
+
+export interface Notification {
+  id: string;
+  uid: string;
+  type: 'comment' | 'subscribe' | 'like';
+  fromUid: string;
+  fromName: string;
+  videoId?: string | null;
+  videoTitle?: string | null;
+  message: string;
+  read: boolean;
+  createdAt: string | null;
+}
+
+export async function getNotifications(): Promise<Notification[]> {
+  const response: any = await getNotificationsFunction();
+  return response.data as Notification[];
+}
+
+export async function markNotificationsRead(): Promise<{ updated: number }> {
+  const response: any = await markNotificationsReadFunction();
+  return response.data as { updated: number };
+}
+
+export interface Playlist {
+  id: string;
+  uid: string;
+  title: string;
+  description: string;
+  visibility: 'public' | 'private';
+  videoIds: string[];
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+export interface PlaylistDetail extends Playlist {
+  videos: Video[];
+}
+
+export async function createPlaylist(
+  title: string,
+  description: string,
+  visibility: 'public' | 'private',
+): Promise<{ id: string }> {
+  const response: any = await createPlaylistFunction({ title, description, visibility });
+  return response.data as { id: string };
+}
+
+export async function getPlaylist(playlistId: string): Promise<PlaylistDetail> {
+  const response: any = await getPlaylistFunction({ playlistId });
+  return response.data as PlaylistDetail;
+}
+
+export async function getUserPlaylists(): Promise<Playlist[]> {
+  const response: any = await getUserPlaylistsFunction();
+  return response.data as Playlist[];
+}
+
+export async function getPublicUserPlaylists(uid: string): Promise<Playlist[]> {
+  const response: any = await getPublicUserPlaylistsFunction({ uid });
+  return response.data as Playlist[];
+}
+
+export async function addToPlaylist(
+  playlistId: string,
+  videoId: string,
+): Promise<{ success: boolean }> {
+  const response: any = await addToPlaylistFunction({ playlistId, videoId });
+  return response.data as { success: boolean };
+}
+
+export async function removeFromPlaylist(
+  playlistId: string,
+  videoId: string,
+): Promise<{ success: boolean }> {
+  const response: any = await removeFromPlaylistFunction({ playlistId, videoId });
+  return response.data as { success: boolean };
+}
+
+export async function deletePlaylist(playlistId: string): Promise<{ success: boolean }> {
+  const response: any = await deletePlaylistFunction({ playlistId });
+  return response.data as { success: boolean };
+}
+
+export async function reorderPlaylist(
+  playlistId: string,
+  videoIds: string[],
+): Promise<{ success: boolean }> {
+  const response: any = await reorderPlaylistFunction({ playlistId, videoIds });
+  return response.data as { success: boolean };
+}
+
+export async function updatePlaylistVisibility(
+  playlistId: string,
+  visibility: 'public' | 'private',
+): Promise<{ success: boolean }> {
+  const response: any = await updatePlaylistVisibilityFunction({ playlistId, visibility });
+  return response.data as { success: boolean };
 }

@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import Image from 'next/image';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { User as FirebaseAuthUser } from 'firebase/auth';
 import styles from './page.module.css';
@@ -11,8 +11,10 @@ import {
   toggleLike, getLikeStatus,
   toggleSubscription, getSubscriptionStatus,
   addComment, getComments, deleteComment,
-  recordView, editComment,
-  Video, User, Comment,
+  recordView, editComment, recordWatchHistory, getWatchHistory,
+  pinComment, unpinComment,
+  getUserPlaylists, addToPlaylist, removeFromPlaylist, getPlaylist,
+  Video, User, Comment, Playlist, PlaylistDetail,
 } from '../firebase/functions';
 import { onAuthStateChangedHelper } from '../firebase/firebase';
 import type HlsType from 'hls.js';
@@ -86,6 +88,29 @@ function shuffle<T>(arr: T[]): T[] {
   return a;
 }
 
+interface Chapter { time: number; title: string; }
+
+function parseChapters(description: string, duration: number): Chapter[] {
+  if (!description || duration <= 0) return [];
+  const re = /^(\d{1,2}):(\d{2})(?::(\d{2}))?\s+(.+)/;
+  const chapters: Chapter[] = [];
+  for (const line of description.split('\n')) {
+    const m = line.trim().match(re);
+    if (!m) continue;
+    const secs = m[3] !== undefined
+      ? Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3])
+      : Number(m[1]) * 60 + Number(m[2]);
+    chapters.push({ time: secs, title: m[4].trim() });
+  }
+  if (chapters.length < 2) return [];
+  if (chapters[0].time !== 0) return [];
+  for (let i = 1; i < chapters.length; i++) {
+    if (chapters[i].time <= chapters[i - 1].time) return [];
+    if (chapters[i].time >= duration) return [];
+  }
+  return chapters;
+}
+
 // ── SVG Icons ─────────────────────────────────────────────────────────────────
 
 function IconPlay() {
@@ -143,7 +168,9 @@ const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
 
 function WatchContent() {
   const videoPrefix = 'https://storage.googleapis.com/koralabs-processed-videos/';
-  const videoSrc = useSearchParams().get('v');
+  const searchParams = useSearchParams();
+  const videoSrc = searchParams.get('v');
+  const listParam = searchParams.get('list');
 
   // Firebase / page state
   const [video, setVideo] = useState<Video | null>(null);
@@ -171,6 +198,7 @@ function WatchContent() {
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [editCommentText, setEditCommentText] = useState('');
   const [savingCommentId, setSavingCommentId] = useState<string | null>(null);
+  const [pinningCommentId, setPinningCommentId] = useState<string | null>(null);
   const [upNextVideos, setUpNextVideos] = useState<Video[]>([]);
   const [upNextUserMap, setUpNextUserMap] = useState<Record<string, User | null>>({});
   const viewRecorded = useRef(false);
@@ -211,6 +239,16 @@ function WatchContent() {
   const [hlsCurrentLevel, setHlsCurrentLevel] = useState(-1);
   const [hlsAutoMode, setHlsAutoMode] = useState(true);
   const [isBuffering, setIsBuffering] = useState(false);
+  const [showToast, setShowToast] = useState(false);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [chaptersOpen, setChaptersOpen] = useState(true);
+
+  // Playlist state
+  const [playlistDetail, setPlaylistDetail] = useState<PlaylistDetail | null>(null);
+  const [userPlaylists, setUserPlaylists] = useState<Playlist[]>([]);
+  const [saveDropdownOpen, setSaveDropdownOpen] = useState(false);
+  const [savingToPlaylist, setSavingToPlaylist] = useState<string | null>(null);
+  const saveDropdownRef = useRef<HTMLDivElement>(null);
 
   // ── Firebase effects ──────────────────────────────────────────────────────────
 
@@ -228,12 +266,25 @@ function WatchContent() {
       .finally(() => setVideoLoading(false));
   }, [videoSrc]);
 
-  // Fetch up-next suggestions: all videos minus current, shuffle, take 5
+  // Fetch up-next suggestions, excluding recently watched (last 24h) when signed in
   useEffect(() => {
     if (!videoSrc) return;
-    getVideos().then(async (all) => {
-      const others = all.filter((v) => v.filename !== videoSrc && v.id !== videoSrc);
-      const picked = shuffle(others).slice(0, 5);
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+    Promise.all([
+      getVideos(),
+      currentUser ? getWatchHistory().catch(() => []) : Promise.resolve([]),
+    ]).then(async ([all, history]) => {
+      const recentIds = new Set(
+        history
+          .filter((h) => h.watchedAt && new Date(h.watchedAt).getTime() > cutoff)
+          .map((h) => h.id)
+          .filter(Boolean) as string[]
+      );
+      const notCurrent = all.filter((v) => v.filename !== videoSrc && v.id !== videoSrc);
+      const unwatched = notCurrent.filter((v) => !recentIds.has(v.id ?? ''));
+      // Fall back to all non-current if history filtering leaves fewer than 5
+      const pool = unwatched.length >= 5 ? unwatched : notCurrent;
+      const picked = shuffle(pool).slice(0, 5);
       setUpNextVideos(picked);
       const uids = [...new Set(picked.map((v) => v.uid).filter((u): u is string => !!u))];
       const entries = await Promise.all(uids.map(async (uid) => {
@@ -242,7 +293,31 @@ function WatchContent() {
       }));
       setUpNextUserMap(Object.fromEntries(entries));
     }).catch(() => {});
-  }, [videoSrc]);
+  }, [videoSrc, currentUser]);
+
+  // Load playlist detail when ?list= param is present
+  useEffect(() => {
+    if (!listParam) { setPlaylistDetail(null); return; }
+    getPlaylist(listParam).then(setPlaylistDetail).catch(() => setPlaylistDetail(null));
+  }, [listParam]);
+
+  // Load user's playlists when save dropdown opens
+  useEffect(() => {
+    if (!saveDropdownOpen || !currentUser) return;
+    getUserPlaylists().then(setUserPlaylists).catch(() => {});
+  }, [saveDropdownOpen, currentUser]);
+
+  // Close save dropdown on outside click
+  useEffect(() => {
+    if (!saveDropdownOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (saveDropdownRef.current && !saveDropdownRef.current.contains(e.target as Node)) {
+        setSaveDropdownOpen(false);
+      }
+    };
+    document.addEventListener('click', handler);
+    return () => document.removeEventListener('click', handler);
+  }, [saveDropdownOpen]);
 
   // HLS.js — initialise for videos with an HLS master playlist
   useEffect(() => {
@@ -652,9 +727,26 @@ function WatchContent() {
       setComments((prev) => [...prev, newComment]);
       setCommentCount((c) => c + 1);
       if (!commentUserMap[currentUser.uid]) {
-        setCommentUserMap((m) => ({ ...m, [currentUser.uid]: {
-          uid: currentUser.uid, email: currentUser.email ?? undefined, displayName: currentUser.displayName ?? undefined,
-        }}));
+        // Fetch from Firestore to get the GCS-mirrored photoUrl
+        getUserById(currentUser.uid).then((u) => {
+          if (u) {
+            setCommentUserMap((m) => ({ ...m, [currentUser.uid]: u }));
+          } else {
+            setCommentUserMap((m) => ({ ...m, [currentUser.uid]: {
+              uid: currentUser.uid,
+              email: currentUser.email ?? undefined,
+              displayName: currentUser.displayName ?? undefined,
+              photoUrl: currentUser.photoURL ?? undefined,
+            }}));
+          }
+        }).catch(() => {
+          setCommentUserMap((m) => ({ ...m, [currentUser.uid]: {
+            uid: currentUser.uid,
+            email: currentUser.email ?? undefined,
+            displayName: currentUser.displayName ?? undefined,
+            photoUrl: currentUser.photoURL ?? undefined,
+          }}));
+        });
       }
     } catch (err) { setCommentText(text); alert(`Failed to post comment: ${err}`); }
     finally { setPostingComment(false); }
@@ -671,6 +763,50 @@ function WatchContent() {
     finally { setDeletingCommentId(null); }
   };
 
+  const handleShare = () => {
+    navigator.clipboard.writeText(window.location.href).then(() => {
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+      setShowToast(true);
+      toastTimerRef.current = setTimeout(() => setShowToast(false), 2000);
+    }).catch(() => {});
+  };
+
+  const handleToggleSaveToPlaylist = async (playlistId: string) => {
+    if (!videoSrc || savingToPlaylist) return;
+    setSavingToPlaylist(playlistId);
+    try {
+      const playlist = userPlaylists.find((p) => p.id === playlistId);
+      const inPlaylist = playlist?.videoIds.includes(videoSrc);
+      if (inPlaylist) {
+        await removeFromPlaylist(playlistId, videoSrc);
+        setUserPlaylists((prev) => prev.map((p) =>
+          p.id === playlistId
+            ? { ...p, videoIds: p.videoIds.filter((id) => id !== videoSrc) }
+            : p
+        ));
+      } else {
+        await addToPlaylist(playlistId, videoSrc);
+        setUserPlaylists((prev) => prev.map((p) =>
+          p.id === playlistId ? { ...p, videoIds: [...p.videoIds, videoSrc] } : p
+        ));
+      }
+    } catch { /* silent */ } finally {
+      setSavingToPlaylist(null);
+    }
+  };
+
+  const router = useRouter();
+
+  // Auto-advance to next video in playlist when video ends
+  const handleVideoEnded = () => {
+    if (!listParam || !playlistDetail) return;
+    const ids = playlistDetail.videoIds;
+    const idx = ids.indexOf(videoSrc ?? '');
+    if (idx >= 0 && idx < ids.length - 1) {
+      router.push(`/watch?v=${ids[idx + 1]}&list=${listParam}`);
+    }
+  };
+
   const handleSaveEdit = async (commentId: string) => {
     if (!video?.id || savingCommentId || !editCommentText.trim()) return;
     setSavingCommentId(commentId);
@@ -681,6 +817,31 @@ function WatchContent() {
       setEditCommentText('');
     } catch (err) { alert(`Failed to edit comment: ${err}`); }
     finally { setSavingCommentId(null); }
+  };
+
+  const handlePinComment = async (commentId: string) => {
+    if (!video?.id || pinningCommentId) return;
+    setPinningCommentId(commentId);
+    try {
+      await pinComment(video.id, commentId);
+      setComments((prev) => {
+        const updated = prev.map((c) => ({ ...c, pinned: c.id === commentId }));
+        const pinned = updated.filter((c) => c.pinned);
+        const rest = updated.filter((c) => !c.pinned);
+        return [...pinned, ...rest];
+      });
+    } catch (err) { alert(`Failed to pin comment: ${err}`); }
+    finally { setPinningCommentId(null); }
+  };
+
+  const handleUnpinComment = async (commentId: string) => {
+    if (!video?.id || pinningCommentId) return;
+    setPinningCommentId(commentId);
+    try {
+      await unpinComment(video.id, commentId);
+      setComments((prev) => prev.map((c) => c.id === commentId ? { ...c, pinned: false } : c));
+    } catch (err) { alert(`Failed to unpin comment: ${err}`); }
+    finally { setPinningCommentId(null); }
   };
 
   // ── Derived ───────────────────────────────────────────────────────────────────
@@ -699,6 +860,10 @@ function WatchContent() {
 
   const progressPct = duration > 0 ? (currentTime / duration) * 100 : 0;
   const bufferedPct = duration > 0 ? (bufferedEnd / duration) * 100 : 0;
+  const chapters = description ? parseChapters(description, duration) : [];
+  const currentChapterIdx = chapters.length > 0
+    ? chapters.reduce((best, ch, i) => ch.time <= currentTime ? i : best, 0)
+    : -1;
 
   const VolumeIcon = muted || volume === 0 ? IconVolumeMuted : volume < 0.5 ? IconVolumeLow : IconVolumeHigh;
 
@@ -799,6 +964,7 @@ function WatchContent() {
                 if (!viewRecorded.current) {
                   viewRecorded.current = true;
                   recordView(vid).then((r) => setViewCount(r.viewCount)).catch(() => {});
+                  if (currentUser) recordWatchHistory(vid).catch(() => {});
                 }
               }, 3000);
             }
@@ -829,6 +995,7 @@ function WatchContent() {
             }
             isSwitchingResRef.current = false;
           }}
+          onEnded={handleVideoEnded}
         />
 
         {/* Feedback overlay */}
@@ -851,6 +1018,13 @@ function WatchContent() {
               <div className={styles.progressBuffered} style={{ width: `${bufferedPct}%` }} />
               <div className={styles.progressFill} style={{ width: `${progressPct}%` }} />
               <div className={styles.progressScrubber} style={{ left: `${progressPct}%` }} />
+              {chapters.slice(1).map((ch) => (
+                <div
+                  key={ch.time}
+                  className={styles.chapterTick}
+                  style={{ left: `${(ch.time / duration) * 100}%` }}
+                />
+              ))}
             </div>
           </div>
 
@@ -1030,10 +1204,108 @@ function WatchContent() {
               {video?.id && (
                 <span className={styles.uploadDate}>Uploaded {formatUploadDate(parseUploadDate(video.id))}</span>
               )}
+              <button type="button" className={styles.shareButton} onClick={handleShare}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="15" height="15">
+                  <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" />
+                  <polyline points="16 6 12 2 8 6" />
+                  <line x1="12" y1="2" x2="12" y2="15" />
+                </svg>
+                Share
+              </button>
+
+              {currentUser && (
+                <div className={styles.saveWrap} ref={saveDropdownRef}>
+                  <button
+                    type="button"
+                    className={styles.shareButton}
+                    onClick={(e) => { e.stopPropagation(); setSaveDropdownOpen((o) => !o); }}
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="15" height="15">
+                      <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+                      <polyline points="17 21 17 13 7 13 7 21" />
+                      <polyline points="7 3 7 8 15 8" />
+                    </svg>
+                    Save
+                  </button>
+                  {saveDropdownOpen && (
+                    <div className={styles.saveDropdown}>
+                      <p className={styles.saveDropdownTitle}>Save to playlist</p>
+                      {userPlaylists.map((pl) => {
+                        const saved = videoSrc ? pl.videoIds.includes(videoSrc) : false;
+                        return (
+                          <button
+                            key={pl.id}
+                            type="button"
+                            className={styles.savePlaylistItem}
+                            onClick={() => handleToggleSaveToPlaylist(pl.id)}
+                            disabled={savingToPlaylist === pl.id}
+                          >
+                            <span className={styles.saveCheckbox}>{saved ? '☑' : '☐'}</span>
+                            <span className={styles.savePlaylistName}>{pl.title}</span>
+                            <span className={`${styles.savePlaylistVis} ${pl.visibility === 'private' ? styles.saveVisPrivate : styles.saveVisPublic}`}>{pl.visibility}</span>
+                          </button>
+                        );
+                      })}
+                      {userPlaylists.length === 0 && (
+                        <p className={styles.saveEmpty}>No playlists yet.</p>
+                      )}
+                      <Link
+                        href="/studio?tab=playlists"
+                        className={styles.newPlaylistBtn}
+                        onClick={() => setSaveDropdownOpen(false)}
+                      >
+                        + New playlist
+                      </Link>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
             
 
             {description && <p className={styles.description}>{description}</p>}
+            {video?.tags && video.tags.length > 0 && (
+              <div className={styles.watchTagRow}>
+                {video.tags.map((tag) => (
+                  <Link
+                    key={tag}
+                    href={`/?category=${encodeURIComponent(tag)}`}
+                    className={styles.watchTag}
+                  >
+                    {tag}
+                  </Link>
+                ))}
+              </div>
+            )}
+
+            {chapters.length > 0 && (
+              <div className={styles.chaptersPanel}>
+                <button
+                  type="button"
+                  className={styles.chapterHeader}
+                  onClick={() => setChaptersOpen((o) => !o)}
+                >
+                  <span className={styles.chapterToggleIcon}>{chaptersOpen ? '▾' : '▸'}</span>
+                  <span>Chapters</span>
+                  <span className={styles.chapterCount}>{chapters.length}</span>
+                </button>
+                {chaptersOpen && (
+                  <div className={styles.chapterList}>
+                    {chapters.map((ch, i) => (
+                      <button
+                        key={ch.time}
+                        type="button"
+                        className={`${styles.chapterItem}${i === currentChapterIdx ? ' ' + styles.chapterItemActive : ''}`}
+                        onClick={() => { if (videoRef.current) videoRef.current.currentTime = ch.time; }}
+                      >
+                        <span className={styles.chapterTimestamp}>{formatTime(ch.time)}</span>
+                        <span className={styles.chapterName}>{ch.title}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
             <div className={styles.divider} />
 
             <div className={styles.channelRow}>
@@ -1121,8 +1393,17 @@ function WatchContent() {
               const commenter = commentUserMap[c.uid] ?? null;
               const displayName = commenter?.displayName || commenter?.email || 'User';
               const initial = displayName.slice(0, 1).toUpperCase();
+              const isMyComment = currentUser?.uid === c.uid;
+              const showMenu = isMyComment || isOwner;
               return (
-                <div key={c.id} className={styles.commentCard}>
+                <div key={c.id} className={`${styles.commentCard}${c.pinned ? ' ' + styles.commentCardPinned : ''}`}>
+                  {c.pinned && (
+                    <div className={styles.pinnedBanner}>
+                      <span className={styles.pinnedIcon}>📌</span>
+                      <span>Pinned by {uploaderLabel}</span>
+                    </div>
+                  )}
+                  <div className={styles.commentCardInner}>
                   <div className={styles.commentAvatar}>
                     {commenter?.photoUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
@@ -1135,7 +1416,7 @@ function WatchContent() {
                     <div className={styles.commentHeader}>
                       <span className={styles.username}>{displayName}</span>
                       <span className={styles.timestamp}>{relativeTime(c.createdAt)}</span>
-                      {currentUser?.uid === c.uid && (
+                      {showMenu && (
                         <div className={styles.commentMenuWrap} onClick={(e) => e.stopPropagation()}>
                           <button
                             type="button"
@@ -1145,17 +1426,37 @@ function WatchContent() {
                           >⋮</button>
                           {openMenuId === c.id && (
                             <div className={styles.commentDropdown}>
-                              <button
-                                type="button"
-                                className={styles.commentDropdownItem}
-                                onClick={() => { setEditingCommentId(c.id); setEditCommentText(c.text); setOpenMenuId(null); }}
-                              >Edit</button>
-                              <button
-                                type="button"
-                                className={styles.commentDropdownItem}
-                                onClick={() => { handleDeleteComment(c.id); setOpenMenuId(null); }}
-                                disabled={deletingCommentId === c.id}
-                              >Delete</button>
+                              {isMyComment && (
+                                <button
+                                  type="button"
+                                  className={styles.commentDropdownItem}
+                                  onClick={() => { setEditingCommentId(c.id); setEditCommentText(c.text); setOpenMenuId(null); }}
+                                >Edit</button>
+                              )}
+                              {isMyComment && (
+                                <button
+                                  type="button"
+                                  className={styles.commentDropdownItem}
+                                  onClick={() => { handleDeleteComment(c.id); setOpenMenuId(null); }}
+                                  disabled={deletingCommentId === c.id}
+                                >Delete</button>
+                              )}
+                              {isOwner && !c.pinned && (
+                                <button
+                                  type="button"
+                                  className={styles.commentDropdownItem}
+                                  onClick={() => { handlePinComment(c.id); setOpenMenuId(null); }}
+                                  disabled={pinningCommentId === c.id}
+                                >Pin comment</button>
+                              )}
+                              {isOwner && c.pinned && (
+                                <button
+                                  type="button"
+                                  className={styles.commentDropdownItem}
+                                  onClick={() => { handleUnpinComment(c.id); setOpenMenuId(null); }}
+                                  disabled={pinningCommentId === c.id}
+                                >Unpin comment</button>
+                              )}
                             </div>
                           )}
                         </div>
@@ -1186,6 +1487,7 @@ function WatchContent() {
                       <p className={styles.commentText}>{c.text}</p>
                     )}
                   </div>
+                  </div>
                 </div>
               );
             })}
@@ -1194,40 +1496,96 @@ function WatchContent() {
         </div>
 
         <div className={styles.sidebar}>
-          <h2 className={styles.sidebarHeading}>Up Next</h2>
-          {upNextVideos.length === 0 && (
-            <p className={styles.noComments}>No other videos yet.</p>
+          {listParam && playlistDetail ? (
+            <>
+              <div className={styles.playlistSidebarHeader}>
+                <h2 className={styles.sidebarHeading}>{playlistDetail.title}</h2>
+                <span className={styles.playlistVisBadge}>{playlistDetail.visibility}</span>
+              </div>
+              {(() => {
+                const ids = playlistDetail.videoIds;
+                const currentIdx = ids.indexOf(videoSrc ?? '');
+                const prevId = currentIdx > 0 ? ids[currentIdx - 1] : null;
+                const nextId = currentIdx >= 0 && currentIdx < ids.length - 1 ? ids[currentIdx + 1] : null;
+                return (
+                  <>
+                    <div className={styles.playlistNav}>
+                      <button
+                        type="button"
+                        className={styles.playlistNavBtn}
+                        disabled={!prevId}
+                        onClick={() => prevId && router.push(`/watch?v=${prevId}&list=${listParam}`)}
+                      >← Prev</button>
+                      <span className={styles.playlistNavPos}>
+                        {currentIdx >= 0 ? `${currentIdx + 1} / ${ids.length}` : `${ids.length} videos`}
+                      </span>
+                      <button
+                        type="button"
+                        className={styles.playlistNavBtn}
+                        disabled={!nextId}
+                        onClick={() => nextId && router.push(`/watch?v=${nextId}&list=${listParam}`)}
+                      >Next →</button>
+                    </div>
+                    <div className={styles.playlistSidebarList}>
+                      {playlistDetail.videos.map((v, i) => {
+                        const thumb = v.thumbnailSmallUrl ?? '/images/thumbnails/thumbnail.png';
+                        const isCurrent = v.id === videoSrc || v.filename === videoSrc;
+                        return (
+                          <Link
+                            key={v.id}
+                            href={`/watch?v=${v.filename ?? v.id}&list=${listParam}`}
+                            className={`${styles.relatedVideoCard} ${isCurrent ? styles.playlistItemActive : ''}`}
+                          >
+                            <span className={styles.playlistItemNum}>{i + 1}</span>
+                            <div className={styles.upNextThumb}>
+                              <Image src={thumb} alt={v.title || 'Video thumbnail'} width={100} height={56} className={styles.upNextThumbImg} unoptimized />
+                            </div>
+                            <div className={styles.videoDetails}>
+                              <h3 className={styles.relatedVideoTitle}>{v.title || 'Untitled'}</h3>
+                            </div>
+                          </Link>
+                        );
+                      })}
+                    </div>
+                  </>
+                );
+              })()}
+            </>
+          ) : (
+            <>
+              <h2 className={styles.sidebarHeading}>Up Next</h2>
+              {upNextVideos.length === 0 && (
+                <p className={styles.noComments}>No other videos yet.</p>
+              )}
+              {upNextVideos.map((v) => {
+                const thumb = v.thumbnailSmallUrl ?? '/images/thumbnails/thumbnail.png';
+                const uploaderUser = v.uid ? upNextUserMap[v.uid] : null;
+                const uploaderName = formatUploader(uploaderUser);
+                const ts = parseUploadDate(v.id);
+                return (
+                  <Link key={v.id} href={`/watch?v=${v.filename ?? v.id}`} className={styles.relatedVideoCard}>
+                    <div className={styles.upNextThumb}>
+                      <Image src={thumb} alt={v.title || 'Video thumbnail'} width={120} height={68} className={styles.upNextThumbImg} unoptimized />
+                    </div>
+                    <div className={styles.videoDetails}>
+                      <h3 className={styles.relatedVideoTitle}>{v.title || 'Untitled'}</h3>
+                      <p className={styles.channelName}>{uploaderName}</p>
+                      <p className={styles.duration}>
+                        {formatViewCount(v.viewCount ?? 0)}
+                        {ts && <> · {timeAgoFromDate(ts)}</>}
+                      </p>
+                    </div>
+                  </Link>
+                );
+              })}
+            </>
           )}
-          {upNextVideos.map((v) => {
-            const thumb = v.thumbnailSmallUrl ?? '/images/thumbnails/thumbnail.png';
-            const uploaderUser = v.uid ? upNextUserMap[v.uid] : null;
-            const uploaderName = formatUploader(uploaderUser);
-            const ts = parseUploadDate(v.id);
-            return (
-              <Link key={v.id} href={`/watch?v=${v.filename ?? v.id}`} className={styles.relatedVideoCard}>
-                <div className={styles.upNextThumb}>
-                  <Image
-                    src={thumb}
-                    alt={v.title || 'Video thumbnail'}
-                    width={120}
-                    height={68}
-                    className={styles.upNextThumbImg}
-                    unoptimized
-                  />
-                </div>
-                <div className={styles.videoDetails}>
-                  <h3 className={styles.relatedVideoTitle}>{v.title || 'Untitled'}</h3>
-                  <p className={styles.channelName}>{uploaderName}</p>
-                  <p className={styles.duration}>
-                    {formatViewCount(v.viewCount ?? 0)}
-                    {ts && <> · {timeAgoFromDate(ts)}</>}
-                  </p>
-                </div>
-              </Link>
-            );
-          })}
         </div>
       </div>
+
+      {showToast && (
+        <div className={styles.toast}>Link copied to clipboard!</div>
+      )}
     </div>
   );
 }

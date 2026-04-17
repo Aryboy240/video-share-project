@@ -302,3 +302,65 @@
     grid-template-columns: repeat(4, 1fr);
   }
 }
+
+/* ── Playlists section ──────────────────────────────────────────────────── */
+.playlistsSection {
+  margin-top: 40px;
+  max-width: 1400px;
+  padding: 24px 40px;
+  margin: 0 auto;
+}
+
+.sectionHeading {
+  font-size: 18px;
+  font-weight: 600;
+  color: #fff;
+  margin: 0 0 16px;
+}
+
+.playlistGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 14px;
+}
+
+.playlistCard {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+  background: #1a1a1a;
+  border: 1px solid #2a2a2a;
+  border-radius: 10px;
+  overflow: hidden;
+  transition: border-color 0.15s;
+}
+
+.playlistCard:hover { border-color: #3a3a3a; }
+
+.playlistCardThumb {
+  width: 100%;
+  aspect-ratio: 16/9;
+  background: #111;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.playlistCount {
+  font-size: 13px;
+  color: #555;
+}
+
+.playlistCardInfo {
+  padding: 8px 10px;
+}
+
+.playlistCardTitle {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #e0e0e0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

@@ -22,6 +22,8 @@ const allowedThumbnailExtensions = new Set([
 /**
  * Fetches an image from a URL and returns the raw buffer.
  * Follows redirects automatically.
+ * @param {string} url - The image URL to fetch.
+ * @return {Promise<Buffer>} Resolves with the raw image buffer.
  */
 function fetchImageBuffer(url: string): Promise<Buffer> {
   return new Promise((resolve, reject) => {
@@ -54,6 +56,9 @@ function fetchImageBuffer(url: string): Promise<Buffer> {
 /**
  * Mirrors a Google profile photo to GCS and returns the public GCS URL.
  * Falls back to the original URL if anything fails.
+ * @param {string} uid - The user's UID, used as the GCS filename.
+ * @param {string} sourceUrl - The Google profile photo URL to mirror.
+ * @return {Promise<string>} The public GCS URL, or sourceUrl on failure.
  */
 async function mirrorAvatarToGcs(
   uid: string,
@@ -161,6 +166,34 @@ export const backfillUserAvatars = onCall(
 );
 
 const videoCollectionId = "videos";
+const watchHistoryCollectionId = "watchHistory";
+
+async function createNotification(
+  uid: string,
+  notification: {
+    type: "comment" | "subscribe" | "like";
+    fromUid: string;
+    fromName: string;
+    videoId?: string;
+    videoTitle?: string;
+    message: string;
+  }
+): Promise<void> {
+  try {
+    await firestore
+      .collection("notifications")
+      .doc(uid)
+      .collection("items")
+      .add({
+        uid,
+        ...notification,
+        read: false,
+        createdAt: FieldValue.serverTimestamp(),
+      });
+  } catch (err) {
+    logger.warn("createNotification failed", err);
+  }
+}
 
 export const generateUploadUrl = onCall(
   {maxInstances: 1, region: "europe-west2"},
@@ -195,6 +228,20 @@ export const generateUploadUrl = onCall(
       throw new functions.https.HttpsError(
         "invalid-argument",
         "Description must be 500 characters or fewer."
+      );
+    }
+
+    const rawTags: string[] = [];
+    if (Array.isArray(data.tags)) {
+      for (const t of data.tags) {
+        if (typeof t === "string" && t.trim().length > 0) {
+          rawTags.push(t.trim().slice(0, 30));
+        }
+      }
+    }
+    if (rawTags.length > 10) {
+      throw new functions.https.HttpsError(
+        "invalid-argument", "Maximum 10 tags allowed."
       );
     }
 
@@ -242,6 +289,7 @@ export const generateUploadUrl = onCall(
       uid: auth.uid,
       title: rawTitle,
       description: rawDescription,
+      tags: rawTags,
     };
 
     await firestore
@@ -266,6 +314,7 @@ export interface Video {
   status?: "processing" | "processed",
   title?: string,
   description?: string,
+  tags?: string[],
   thumbnailUrl?: string,
   thumbnailSmallUrl?: string,
   thumbnailMediumUrl?: string,
@@ -376,8 +425,10 @@ export const getVideos = onCall(
   {maxInstances: 1, region: "europe-west2"},
   async () => {
     const querySnapshot =
-      await firestore.collection(videoCollectionId).limit(10).get();
-    return querySnapshot.docs.map((doc) => doc.data());
+      await firestore.collection(videoCollectionId).limit(50).get();
+    return querySnapshot.docs
+      .map((doc) => doc.data())
+      .filter((v) => v.status === "processed");
   });
 
 export const getVideoById = onCall(
@@ -529,9 +580,24 @@ export const updateVideoMetadata = onCall(
       );
     }
 
+    const rawTags: string[] = [];
+    if (Array.isArray(request.data.tags)) {
+      for (const t of request.data.tags) {
+        if (typeof t === "string" && t.trim().length > 0) {
+          rawTags.push(t.trim().slice(0, 30));
+        }
+      }
+    }
+    if (rawTags.length > 10) {
+      throw new functions.https.HttpsError(
+        "invalid-argument", "Maximum 10 tags allowed."
+      );
+    }
+
     const updates: Record<string, unknown> = {
       title: rawTitle,
       description: rawDescription,
+      tags: rawTags,
     };
 
     let thumbnailUploadUrl: string | null = null;
@@ -621,6 +687,25 @@ export const toggleSubscription = onCall(
       return true;
     });
 
+    if (subscribed) {
+      (async () => {
+        try {
+          const userSnap = await firestore
+            .collection("users").doc(subscriberUid).get();
+          const fromName =
+            (userSnap.data() ?? {}).displayName as string || "Someone";
+          await createNotification(channelUid, {
+            type: "subscribe",
+            fromUid: subscriberUid,
+            fromName,
+            message: `${fromName} subscribed to your channel`,
+          });
+        } catch (err) {
+          logger.warn("toggleSubscription notification failed", err);
+        }
+      })();
+    }
+
     return {subscribed};
   }
 );
@@ -708,6 +793,32 @@ export const toggleLike = onCall(
         return action as "like" | "dislike";
       });
 
+    if (newAction === "like") {
+      (async () => {
+        try {
+          const [videoSnap, userSnap] = await Promise.all([
+            videoRef.get(),
+            firestore.collection("users").doc(uid).get(),
+          ]);
+          const videoData = videoSnap.data() ?? {};
+          const ownerUid = videoData.uid as string | undefined;
+          if (!ownerUid || ownerUid === uid) return;
+          const fromName =
+            (userSnap.data() ?? {}).displayName as string || "Someone";
+          await createNotification(ownerUid, {
+            type: "like",
+            fromUid: uid,
+            fromName,
+            videoId,
+            videoTitle: videoData.title as string | undefined,
+            message: `${fromName} liked your video`,
+          });
+        } catch (err) {
+          logger.warn("toggleLike notification failed", err);
+        }
+      })();
+    }
+
     return {action: newAction};
   }
 );
@@ -775,6 +886,32 @@ export const addComment = onCall(
       });
       tx.set(videoRef, {commentCount: FieldValue.increment(1)}, {merge: true});
     });
+
+    // Fire notification — non-fatal, don't await
+    (async () => {
+      try {
+        const [videoSnap, userSnap] = await Promise.all([
+          videoRef.get(),
+          firestore.collection("users").doc(uid).get(),
+        ]);
+        const videoData = videoSnap.data() ?? {};
+        const ownerUid = videoData.uid as string | undefined;
+        if (!ownerUid || ownerUid === uid) return;
+        const fromName =
+          (userSnap.data() ?? {}).displayName as string || "Someone";
+        await createNotification(ownerUid, {
+          type: "comment",
+          fromUid: uid,
+          fromName,
+          videoId,
+          videoTitle: videoData.title as string | undefined,
+          message: `${fromName} commented on your video`,
+        });
+      } catch (err) {
+        logger.warn("addComment notification failed", err);
+      }
+    })();
+
     return {id: newRef.id};
   }
 );
@@ -788,12 +925,15 @@ export const getComments = onCall(
         "invalid-argument", "A videoId is required."
       );
     }
-    const snap = await firestore
-      .collection("comments").doc(videoId).collection("messages")
-      .orderBy("createdAt", "asc")
-      .limit(50)
-      .get();
-    return snap.docs.map((d) => {
+    const messagesRef = firestore
+      .collection("comments").doc(videoId).collection("messages");
+
+    const [pinnedSnap, regularSnap] = await Promise.all([
+      messagesRef.where("pinned", "==", true).limit(1).get(),
+      messagesRef.orderBy("createdAt", "asc").limit(50).get(),
+    ]);
+
+    const mapDoc = (d: FirebaseFirestore.QueryDocumentSnapshot) => {
       const data = d.data();
       const ts = data.createdAt;
       return {
@@ -801,8 +941,17 @@ export const getComments = onCall(
         uid: data.uid as string,
         text: data.text as string,
         createdAt: ts ? ts.toDate().toISOString() : null,
+        pinned: data.pinned === true,
       };
-    });
+    };
+
+    const pinnedIds = new Set(pinnedSnap.docs.map((d) => d.id));
+    const regular = regularSnap.docs
+      .filter((d) => !pinnedIds.has(d.id))
+      .map(mapDoc);
+    const pinned = pinnedSnap.docs.map(mapDoc);
+
+    return [...pinned, ...regular];
   }
 );
 
@@ -1164,6 +1313,572 @@ export const adminDeleteVideo = onCall(
     }
 
     await docRef.delete();
+    return {success: true};
+  }
+);
+
+export const recordWatchHistory = onCall(
+  {maxInstances: 1, region: "europe-west2"},
+  async (request) => {
+    if (!request.auth) {
+      throw new functions.https.HttpsError(
+        "unauthenticated", "Must be authenticated."
+      );
+    }
+    const videoId = request.data?.videoId;
+    if (typeof videoId !== "string" || !videoId) {
+      throw new functions.https.HttpsError(
+        "invalid-argument", "A videoId is required."
+      );
+    }
+    const uid = request.auth.uid;
+    await firestore
+      .collection(watchHistoryCollectionId)
+      .doc(`${uid}_${videoId}`)
+      .set(
+        {uid, videoId, watchedAt: FieldValue.serverTimestamp()},
+        {merge: true}
+      );
+    return {success: true};
+  }
+);
+
+export const getWatchHistory = onCall(
+  {maxInstances: 1, region: "europe-west2"},
+  async (request) => {
+    if (!request.auth) {
+      throw new functions.https.HttpsError(
+        "unauthenticated", "Must be authenticated."
+      );
+    }
+    const uid = request.auth.uid;
+    const snap = await firestore
+      .collection(watchHistoryCollectionId)
+      .where("uid", "==", uid)
+      .limit(50)
+      .get();
+
+    // Sort by watchedAt desc client-side (avoids composite index requirement)
+    const historyDocs = snap.docs.slice().sort((a, b) => {
+      const ta = a.data().watchedAt?.toMillis?.() ?? 0;
+      const tb = b.data().watchedAt?.toMillis?.() ?? 0;
+      return tb - ta;
+    });
+
+    const videos: unknown[] = [];
+    for (const doc of historyDocs) {
+      const {videoId, watchedAt} = doc.data();
+      const videoSnap = await firestore
+        .collection(videoCollectionId)
+        .doc(videoId)
+        .get();
+      if (!videoSnap.exists) continue;
+      videos.push({
+        ...videoSnap.data(),
+        watchedAt: watchedAt?.toDate?.()?.toISOString() ?? null,
+      });
+    }
+    return videos;
+  }
+);
+
+export const clearWatchHistory = onCall(
+  {maxInstances: 1, region: "europe-west2"},
+  async (request) => {
+    if (!request.auth) {
+      throw new functions.https.HttpsError(
+        "unauthenticated", "Must be authenticated."
+      );
+    }
+    const uid = request.auth.uid;
+    let deleted = 0;
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const snap = await firestore
+        .collection(watchHistoryCollectionId)
+        .where("uid", "==", uid)
+        .limit(500)
+        .get();
+      if (snap.empty) break;
+      const batch = firestore.batch();
+      snap.docs.forEach((d) => batch.delete(d.ref));
+      await batch.commit();
+      deleted += snap.docs.length;
+      if (snap.docs.length < 500) break;
+    }
+    return {deleted};
+  }
+);
+
+export const pinComment = onCall(
+  {maxInstances: 1, region: "europe-west2"},
+  async (request) => {
+    if (!request.auth) {
+      throw new functions.https.HttpsError(
+        "unauthenticated", "Must be authenticated."
+      );
+    }
+    const {videoId, commentId} = request.data;
+    if (typeof videoId !== "string" || !videoId) {
+      throw new functions.https.HttpsError(
+        "invalid-argument", "A videoId is required."
+      );
+    }
+    if (typeof commentId !== "string" || !commentId) {
+      throw new functions.https.HttpsError(
+        "invalid-argument", "A commentId is required."
+      );
+    }
+    const videoSnap = await firestore
+      .collection(videoCollectionId).doc(videoId).get();
+    if (!videoSnap.exists) {
+      throw new functions.https.HttpsError("not-found", "Video not found.");
+    }
+    if ((videoSnap.data() ?? {}).uid !== request.auth.uid) {
+      throw new functions.https.HttpsError(
+        "permission-denied", "Only the channel owner can pin comments."
+      );
+    }
+    const messagesRef = firestore
+      .collection("comments").doc(videoId).collection("messages");
+    // Unpin any currently pinned comments
+    const pinnedSnap = await messagesRef.where("pinned", "==", true).get();
+    const batch = firestore.batch();
+    pinnedSnap.docs.forEach(
+      (d) => batch.set(d.ref, {pinned: false}, {merge: true})
+    );
+    batch.set(messagesRef.doc(commentId), {pinned: true}, {merge: true});
+    await batch.commit();
+    return {success: true};
+  }
+);
+
+export const unpinComment = onCall(
+  {maxInstances: 1, region: "europe-west2"},
+  async (request) => {
+    if (!request.auth) {
+      throw new functions.https.HttpsError(
+        "unauthenticated", "Must be authenticated."
+      );
+    }
+    const {videoId, commentId} = request.data;
+    if (typeof videoId !== "string" || !videoId) {
+      throw new functions.https.HttpsError(
+        "invalid-argument", "A videoId is required."
+      );
+    }
+    if (typeof commentId !== "string" || !commentId) {
+      throw new functions.https.HttpsError(
+        "invalid-argument", "A commentId is required."
+      );
+    }
+    const videoSnap = await firestore
+      .collection(videoCollectionId).doc(videoId).get();
+    if (!videoSnap.exists) {
+      throw new functions.https.HttpsError("not-found", "Video not found.");
+    }
+    if ((videoSnap.data() ?? {}).uid !== request.auth.uid) {
+      throw new functions.https.HttpsError(
+        "permission-denied", "Only the channel owner can unpin comments."
+      );
+    }
+    await firestore
+      .collection("comments").doc(videoId)
+      .collection("messages").doc(commentId)
+      .set({pinned: false}, {merge: true});
+    return {success: true};
+  }
+);
+
+export const getNotifications = onCall(
+  {maxInstances: 1, region: "europe-west2"},
+  async (request) => {
+    if (!request.auth) {
+      throw new functions.https.HttpsError(
+        "unauthenticated", "Must be authenticated."
+      );
+    }
+    const uid = request.auth.uid;
+    const snap = await firestore
+      .collection("notifications")
+      .doc(uid)
+      .collection("items")
+      .orderBy("createdAt", "desc")
+      .limit(20)
+      .get();
+    return snap.docs.map((d) => {
+      const data = d.data();
+      return {
+        id: d.id,
+        uid: data.uid,
+        type: data.type,
+        fromUid: data.fromUid,
+        fromName: data.fromName,
+        videoId: data.videoId ?? null,
+        videoTitle: data.videoTitle ?? null,
+        message: data.message,
+        read: data.read === true,
+        createdAt: data.createdAt?.toDate?.()?.toISOString() ?? null,
+      };
+    });
+  }
+);
+
+export const markNotificationsRead = onCall(
+  {maxInstances: 1, region: "europe-west2"},
+  async (request) => {
+    if (!request.auth) {
+      throw new functions.https.HttpsError(
+        "unauthenticated", "Must be authenticated."
+      );
+    }
+    const uid = request.auth.uid;
+    const snap = await firestore
+      .collection("notifications")
+      .doc(uid)
+      .collection("items")
+      .where("read", "==", false)
+      .get();
+    if (snap.empty) return {updated: 0};
+    const batch = firestore.batch();
+    snap.docs.forEach((d) => batch.update(d.ref, {read: true}));
+    await batch.commit();
+    return {updated: snap.docs.length};
+  }
+);
+
+// ── Playlist functions ───────────────────────────────────────────────────────
+
+const playlistCollectionId = "playlists";
+
+export const createPlaylist = onCall(
+  {maxInstances: 1, region: "europe-west2"},
+  async (request) => {
+    if (!request.auth) {
+      throw new functions.https.HttpsError(
+        "unauthenticated", "Must be authenticated."
+      );
+    }
+    const {title, description, visibility} = request.data;
+    const rawTitle = typeof title === "string" ? title.trim() : "";
+    if (!rawTitle) {
+      throw new functions.https.HttpsError(
+        "invalid-argument", "A playlist title is required."
+      );
+    }
+    if (rawTitle.length > 150) {
+      throw new functions.https.HttpsError(
+        "invalid-argument", "Title must be 150 characters or fewer."
+      );
+    }
+    const vis = visibility === "private" ? "private" : "public";
+    const uid = request.auth.uid;
+    const ref = firestore.collection(playlistCollectionId).doc();
+    await ref.set({
+      uid,
+      title: rawTitle,
+      description: typeof description === "string" ? description.trim() : "",
+      visibility: vis,
+      videoIds: [],
+      createdAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    return {id: ref.id};
+  }
+);
+
+export const getPlaylist = onCall(
+  {maxInstances: 1, region: "europe-west2"},
+  async (request) => {
+    const {playlistId} = request.data;
+    if (typeof playlistId !== "string" || !playlistId) {
+      throw new functions.https.HttpsError(
+        "invalid-argument", "A playlistId is required."
+      );
+    }
+    const snap = await firestore
+      .collection(playlistCollectionId).doc(playlistId).get();
+    if (!snap.exists) {
+      throw new functions.https.HttpsError("not-found", "Playlist not found.");
+    }
+    const data = snap.data() ?? {};
+    if (
+      data.visibility === "private" &&
+      (!request.auth || request.auth.uid !== data.uid)
+    ) {
+      throw new functions.https.HttpsError(
+        "permission-denied", "This playlist is private."
+      );
+    }
+    const videoIds: string[] =
+      Array.isArray(data.videoIds) ? data.videoIds : [];
+    const videos: unknown[] = [];
+    for (const vid of videoIds) {
+      const vSnap = await firestore
+        .collection(videoCollectionId).doc(vid).get();
+      if (vSnap.exists && vSnap.data()?.status === "processed") {
+        videos.push({id: vSnap.id, ...vSnap.data()});
+      }
+    }
+    return {
+      id: snap.id,
+      uid: data.uid,
+      title: data.title,
+      description: data.description ?? "",
+      visibility: data.visibility,
+      videoIds,
+      videos,
+      createdAt: data.createdAt?.toDate?.()?.toISOString() ?? null,
+      updatedAt: data.updatedAt?.toDate?.()?.toISOString() ?? null,
+    };
+  }
+);
+
+export const getUserPlaylists = onCall(
+  {maxInstances: 1, region: "europe-west2"},
+  async (request) => {
+    if (!request.auth) {
+      throw new functions.https.HttpsError(
+        "unauthenticated", "Must be authenticated."
+      );
+    }
+    const uid = request.auth.uid;
+    const snap = await firestore
+      .collection(playlistCollectionId)
+      .where("uid", "==", uid)
+      .limit(50)
+      .get();
+    const rows = snap.docs.map((d) => {
+      const data = d.data();
+      return {
+        id: d.id,
+        uid: data.uid,
+        title: data.title,
+        description: data.description ?? "",
+        visibility: data.visibility ?? "public",
+        videoIds: Array.isArray(data.videoIds) ? data.videoIds : [],
+        createdAt: data.createdAt?.toDate?.()?.toISOString() ?? null,
+        updatedAt: data.updatedAt?.toDate?.()?.toISOString() ?? null,
+      };
+    });
+    rows.sort((a, b) => {
+      const ta = a.createdAt ?? "";
+      const tb = b.createdAt ?? "";
+      return tb.localeCompare(ta);
+    });
+    return rows;
+  }
+);
+
+export const getPublicUserPlaylists = onCall(
+  {maxInstances: 1, region: "europe-west2"},
+  async (request) => {
+    const {uid} = request.data;
+    if (typeof uid !== "string" || !uid) {
+      throw new functions.https.HttpsError(
+        "invalid-argument", "A uid is required."
+      );
+    }
+    const snap = await firestore
+      .collection(playlistCollectionId)
+      .where("uid", "==", uid)
+      .where("visibility", "==", "public")
+      .limit(50)
+      .get();
+    const rows = snap.docs.map((d) => {
+      const data = d.data();
+      return {
+        id: d.id,
+        uid: data.uid,
+        title: data.title,
+        description: data.description ?? "",
+        visibility: data.visibility ?? "public",
+        videoIds: Array.isArray(data.videoIds) ? data.videoIds : [],
+        createdAt: data.createdAt?.toDate?.()?.toISOString() ?? null,
+        updatedAt: data.updatedAt?.toDate?.()?.toISOString() ?? null,
+      };
+    });
+    rows.sort((a, b) => {
+      const ta = a.createdAt ?? "";
+      const tb = b.createdAt ?? "";
+      return tb.localeCompare(ta);
+    });
+    return rows;
+  }
+);
+
+export const addToPlaylist = onCall(
+  {maxInstances: 1, region: "europe-west2"},
+  async (request) => {
+    if (!request.auth) {
+      throw new functions.https.HttpsError(
+        "unauthenticated", "Must be authenticated."
+      );
+    }
+    const {playlistId, videoId} = request.data;
+    if (typeof playlistId !== "string" || !playlistId) {
+      throw new functions.https.HttpsError(
+        "invalid-argument", "A playlistId is required."
+      );
+    }
+    if (typeof videoId !== "string" || !videoId) {
+      throw new functions.https.HttpsError(
+        "invalid-argument", "A videoId is required."
+      );
+    }
+    const ref = firestore.collection(playlistCollectionId).doc(playlistId);
+    const snap = await ref.get();
+    if (!snap.exists) {
+      throw new functions.https.HttpsError("not-found", "Playlist not found.");
+    }
+    if ((snap.data() ?? {}).uid !== request.auth.uid) {
+      throw new functions.https.HttpsError(
+        "permission-denied", "You can only modify your own playlists."
+      );
+    }
+    await ref.update({
+      videoIds: FieldValue.arrayUnion(videoId),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    return {success: true};
+  }
+);
+
+export const removeFromPlaylist = onCall(
+  {maxInstances: 1, region: "europe-west2"},
+  async (request) => {
+    if (!request.auth) {
+      throw new functions.https.HttpsError(
+        "unauthenticated", "Must be authenticated."
+      );
+    }
+    const {playlistId, videoId} = request.data;
+    if (typeof playlistId !== "string" || !playlistId) {
+      throw new functions.https.HttpsError(
+        "invalid-argument", "A playlistId is required."
+      );
+    }
+    if (typeof videoId !== "string" || !videoId) {
+      throw new functions.https.HttpsError(
+        "invalid-argument", "A videoId is required."
+      );
+    }
+    const ref = firestore.collection(playlistCollectionId).doc(playlistId);
+    const snap = await ref.get();
+    if (!snap.exists) {
+      throw new functions.https.HttpsError("not-found", "Playlist not found.");
+    }
+    if ((snap.data() ?? {}).uid !== request.auth.uid) {
+      throw new functions.https.HttpsError(
+        "permission-denied", "You can only modify your own playlists."
+      );
+    }
+    await ref.update({
+      videoIds: FieldValue.arrayRemove(videoId),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    return {success: true};
+  }
+);
+
+export const deletePlaylist = onCall(
+  {maxInstances: 1, region: "europe-west2"},
+  async (request) => {
+    if (!request.auth) {
+      throw new functions.https.HttpsError(
+        "unauthenticated", "Must be authenticated."
+      );
+    }
+    const {playlistId} = request.data;
+    if (typeof playlistId !== "string" || !playlistId) {
+      throw new functions.https.HttpsError(
+        "invalid-argument", "A playlistId is required."
+      );
+    }
+    const ref = firestore.collection(playlistCollectionId).doc(playlistId);
+    const snap = await ref.get();
+    if (!snap.exists) {
+      throw new functions.https.HttpsError("not-found", "Playlist not found.");
+    }
+    if ((snap.data() ?? {}).uid !== request.auth.uid) {
+      throw new functions.https.HttpsError(
+        "permission-denied", "You can only delete your own playlists."
+      );
+    }
+    await ref.delete();
+    return {success: true};
+  }
+);
+
+export const reorderPlaylist = onCall(
+  {maxInstances: 1, region: "europe-west2"},
+  async (request) => {
+    if (!request.auth) {
+      throw new functions.https.HttpsError(
+        "unauthenticated", "Must be authenticated."
+      );
+    }
+    const {playlistId, videoIds} = request.data;
+    if (typeof playlistId !== "string" || !playlistId) {
+      throw new functions.https.HttpsError(
+        "invalid-argument", "A playlistId is required."
+      );
+    }
+    if (
+      !Array.isArray(videoIds) ||
+      !videoIds.every((v) => typeof v === "string")
+    ) {
+      throw new functions.https.HttpsError(
+        "invalid-argument", "videoIds must be an array of strings."
+      );
+    }
+    const ref = firestore.collection(playlistCollectionId).doc(playlistId);
+    const snap = await ref.get();
+    if (!snap.exists) {
+      throw new functions.https.HttpsError("not-found", "Playlist not found.");
+    }
+    if ((snap.data() ?? {}).uid !== request.auth.uid) {
+      throw new functions.https.HttpsError(
+        "permission-denied", "You can only reorder your own playlists."
+      );
+    }
+    await ref.update({
+      videoIds,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    return {success: true};
+  }
+);
+
+export const updatePlaylistVisibility = onCall(
+  {maxInstances: 1, region: "europe-west2"},
+  async (request) => {
+    if (!request.auth) {
+      throw new functions.https.HttpsError(
+        "unauthenticated", "Must be authenticated."
+      );
+    }
+    const {playlistId, visibility} = request.data;
+    if (typeof playlistId !== "string" || !playlistId) {
+      throw new functions.https.HttpsError(
+        "invalid-argument", "A playlistId is required."
+      );
+    }
+    const vis = visibility === "private" ? "private" : "public";
+    const ref = firestore.collection(playlistCollectionId).doc(playlistId);
+    const snap = await ref.get();
+    if (!snap.exists) {
+      throw new functions.https.HttpsError("not-found", "Playlist not found.");
+    }
+    if ((snap.data() ?? {}).uid !== request.auth.uid) {
+      throw new functions.https.HttpsError(
+        "permission-denied", "You can only update your own playlists."
+      );
+    }
+    await ref.update({
+      visibility: vis,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
     return {success: true};
   }
 );
