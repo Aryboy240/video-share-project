@@ -20,8 +20,8 @@ A full-stack video sharing platform built on Google Cloud Platform. Videos are u
 The home page displays all published videos in a responsive card grid. Category filter pills let users browse by tag, a live search bar filters results as you type, and each thumbnail card shows a duration overlay, uploader name, and view count. Thumbnails are served as Sharp-compressed variants — never the original upload.
 
 <p align="center">
-  <img src="screenshots/home_page.png" >
-  <img src="screenshots/Searching.png" width="60%"/>
+  <img src="screenshots/home_page.png"/>
+  <img src="screenshots/Searching.png"/>
 </p>
 
 ---
@@ -45,13 +45,13 @@ The studio dashboard lists all of a creator's videos with live processing status
 While the video processes, the studio card polls Firestore every 5 seconds and advances a labelled progress bar through stages: *Downloading → Transcoding → Uploading → Processed*. Existing videos can be edited inline — title, description, tags, and thumbnail — without re-uploading.
 
 <p align="center">
-  <img src="screenshots/Studio_page.png" width="90%"/>
+  <img src="screenshots/Studio_page.png"/>
   
 </p>
 
 
 <p align="center">
-   <img src="screenshots/upload.png" width="48%"/>
+  <img src="screenshots/upload.png" width="48%"/>
   <img src="screenshots/edit_video.png" width="32.55%" />
 </p>
 
@@ -64,7 +64,7 @@ Comments support inline editing, deletion (owner only), and pinning (video owner
 The notification bell in the navbar shows an unread badge and lists recent activity — new comments on your videos, likes, and new subscribers — updated every 60 seconds, with a mark-all-read action.
 
 <p align="center">
-  <img src="screenshots/Comments.png" width="90%"/>
+  <img src="screenshots/Comments.png"/>
   <img src="screenshots/Notifications.png" width="75%"/>
 </p>
 
@@ -75,8 +75,8 @@ The notification bell in the navbar shows an unread badge and lists recent activ
 Users can create public or private playlists, add videos from the watch page, and manage them from the studio. The playlist page supports drag-to-reorder via the HTML5 Drag and Drop API with optimistic UI updates, and remove-from-playlist. Watching a playlist opens a sidebar with the full track list, a position indicator (e.g. *3 / 7*), previous/next navigation, and auto-advance when a video ends. Visibility toggles between public and private at any time.
 
 <p align="center">
-  <img src="screenshots/playlist_page.png" width="85%"/>
-  <img src="screenshots/playlist_test.png" width="70%"/>
+  <img src="screenshots/playlist_page.png"/>
+  <img src="screenshots/playlist_test.png"/>
 </p>
 
 ---
@@ -86,7 +86,7 @@ Users can create public or private playlists, add videos from the watch page, an
 Every video watched for more than 3 seconds is recorded in the user's watch history. The history page shows all viewed videos with timestamps and a clear-history option. The *Up Next* sidebar on the watch page deprioritises videos seen in the last 24 hours and randomly selects from the remaining pool — providing varied suggestions across page loads.
 
 <p align="center">
-  <img src="screenshots/Watch_History.png" width="80%"/>
+  <img src="screenshots/Watch_History.png"/>
 </p>
 
 ---
