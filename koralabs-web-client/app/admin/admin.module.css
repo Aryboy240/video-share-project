@@ -1,0 +1,199 @@
+.page {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 24px;
+  color: #ffffff;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  min-height: 100vh;
+  background-color: #121212;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #2a2a2a;
+}
+
+.heading {
+  font-size: 22px;
+  font-weight: 600;
+  margin: 0;
+  color: #ffffff;
+}
+
+.signOutButton {
+  background-color: transparent;
+  border: 1px solid #555;
+  color: #ccc;
+  padding: 8px 18px;
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.signOutButton:hover {
+  background-color: #2a2a2a;
+  border-color: #777;
+  color: #fff;
+}
+
+.tableWrap {
+  background-color: #1a1a1a;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid #2a2a2a;
+}
+
+.tableHeader {
+  display: grid;
+  grid-template-columns: 100px minmax(0, 1fr) 180px 120px 110px 70px 100px;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 16px;
+  background-color: #121212;
+  font-size: 11px;
+  font-weight: 600;
+  color: #666;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid #2a2a2a;
+}
+
+.tableRow {
+  display: grid;
+  grid-template-columns: 100px minmax(0, 1fr) 180px 120px 110px 70px 100px;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid #222;
+  font-size: 13px;
+  color: #ccc;
+  transition: background-color 0.15s ease;
+}
+
+.tableRow:hover {
+  background-color: #1f1f1f;
+}
+
+.tableRow:last-child {
+  border-bottom: none;
+}
+
+.thumb {
+  width: 100px;
+  height: 56px;
+  object-fit: cover;
+  border-radius: 4px;
+  background-color: #0f0f0f;
+  border: 1px solid #333;
+  display: block;
+}
+
+.titleCell {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.videoTitle {
+  font-size: 13px;
+  font-weight: 500;
+  color: #ffffff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.videoId {
+  font-size: 11px;
+  color: #555;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: monospace;
+}
+
+.uidCell {
+  font-size: 11px;
+  color: #888;
+  font-family: monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.badge {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.badgeProcessed {
+  background-color: rgba(76, 175, 80, 0.15);
+  color: #4caf50;
+  border: 1px solid rgba(76, 175, 80, 0.3);
+}
+
+.badgeProcessing {
+  background-color: rgba(255, 152, 0, 0.15);
+  color: #ff9800;
+  border: 1px solid rgba(255, 152, 0, 0.3);
+}
+
+.deleteButton {
+  background-color: transparent;
+  border: 1px solid #ff5c5c;
+  color: #ff5c5c;
+  padding: 5px 12px;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.deleteButton:hover:not(:disabled) {
+  background-color: #ff5c5c;
+  color: #fff;
+  box-shadow: 0 0 8px rgba(255, 92, 92, 0.35);
+}
+
+.deleteButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.empty {
+  padding: 40px 16px;
+  text-align: center;
+  color: #555;
+  font-size: 14px;
+}
+
+@media (max-width: 900px) {
+  .tableHeader,
+  .tableRow {
+    grid-template-columns: 80px minmax(0, 1fr) 90px 80px;
+  }
+  .tableHeader > div:nth-child(3),
+  .tableRow > div:nth-child(3),
+  .tableHeader > div:nth-child(5),
+  .tableRow > div:nth-child(5),
+  .tableHeader > div:nth-child(6),
+  .tableRow > div:nth-child(6) {
+    display: none;
+  }
+}

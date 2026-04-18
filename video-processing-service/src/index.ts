@@ -1,15 +1,15 @@
 import express from 'express';
 
-import { 
-  uploadProcessedVideo,
+import {
   downloadRawVideo,
   deleteRawVideo,
-  deleteProcessedVideo,
-  convertVideo,
+  deleteRawVideoFromBucket,
+  transcodeToHLS,
+  getVideoDuration,
   setupDirectories
 } from './storage';
 
-import { isVideoNew, setVideo } from "./firestore";
+import { isVideoNew, setVideo, updateVideoProgress } from "./firestore";
 
 // Create the local directories for videos
 setupDirectories();
@@ -34,45 +34,71 @@ app.post('/process-video', async (req, res) => {
   }
 
   const inputFileName = data.name; // Format of <UID>-<DATE>.<EXTENSION>
-  const outputFileName = `processed-${inputFileName}`;
   const videoId = inputFileName.split('.')[0]; // Extract the UID part as video ID
 
   if (!await isVideoNew(videoId)) {
-  return res.status(400).send('Bad Request: video is already being processed.');
+    return res.status(400).send('Bad Request: video is already being processed.');
   } else {
     await setVideo(videoId, {
       id: videoId,
       uid: videoId.split('-')[0],
       status: 'processing',
+      progress: 0,
+      processingStage: 'downloading',
     });
   }
 
   // Download the raw video from Cloud Storage
   await downloadRawVideo(inputFileName);
+  await updateVideoProgress(videoId, 10, 'transcoding');
 
-  // Process the video into 360p
-  try { 
-    await convertVideo(inputFileName, outputFileName)
+  // Transcode into HLS adaptive streams
+  let masterFilename: string;
+  try {
+    masterFilename = await transcodeToHLS(
+      inputFileName,
+      videoId,
+      async (done, total) => {
+        const progress = Math.round(10 + (75 * done) / total);
+        await updateVideoProgress(videoId, progress, 'transcoding');
+      },
+    );
   } catch (err) {
-    await Promise.all([
-      deleteRawVideo(inputFileName),
-      deleteProcessedVideo(outputFileName)
-    ]);
+    await deleteRawVideo(inputFileName);
     return res.status(500).send('Processing failed');
   }
-  
-  // Upload the processed video to Cloud Storage
-  await uploadProcessedVideo(outputFileName);
+
+  const hlsMasterUrl =
+    `https://storage.googleapis.com/koralabs-processed-videos/${masterFilename}`;
+
+  let duration: number | undefined;
+  try {
+    duration = await getVideoDuration(`./raw-videos/${inputFileName}`);
+  } catch (err) {
+    console.warn('Could not determine video duration:', err);
+  }
 
   await setVideo(videoId, {
     status: 'processed',
-    filename: outputFileName,
+    filename: videoId,  // used as the watch URL param for HLS videos
+    hlsMasterUrl,
+    streamType: 'hls',
+    progress: 100,
+    processingStage: 'complete',
+    ...(duration !== undefined ? { duration } : {}),
   });
 
-  await Promise.all([
-    deleteRawVideo(inputFileName),
-    deleteProcessedVideo(outputFileName)
-  ]);
+  try {
+    await deleteRawVideoFromBucket(inputFileName);
+  } catch (err) {
+    console.error(
+      `Failed to delete raw video gs://koralabs-raw-videos/${inputFileName}. ` +
+      `Processing succeeded; continuing.`,
+      err
+    );
+  }
+
+  await deleteRawVideo(inputFileName);
 
   return res.status(200).send('Processing finished successfully');
 });

@@ -1,0 +1,260 @@
+.page {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 24px 20px;
+  color: #fff;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #2a2a2a;
+}
+
+.heading {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.clearButton {
+  padding: 7px 16px;
+  border: 1px solid #444;
+  border-radius: 6px;
+  background: transparent;
+  color: #aaa;
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.clearButton:hover:not(:disabled) {
+  border-color: #e53935;
+  color: #e53935;
+}
+
+.clearButton:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ── History list ────────────────────────────────────────────────────────── */
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.row {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.thumbLink {
+  flex-shrink: 0;
+  display: block;
+  width: 200px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #1a1a1a;
+}
+
+.thumb {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  display: block;
+  transition: opacity 0.15s;
+}
+
+.thumbLink:hover .thumb {
+  opacity: 0.85;
+}
+
+.meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.titleLink {
+  text-decoration: none;
+  color: inherit;
+}
+
+.title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: #fff;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.titleLink:hover .title {
+  color: var(--primary-accent, #ff4500);
+}
+
+.channelRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #2a2a2a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.avatarImg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.avatarInitial {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--primary-accent, #ff4500);
+}
+
+.avatarLink {
+  display: block;
+  flex-shrink: 0;
+}
+
+.uploaderLink {
+  font-size: 13px;
+  color: #aaa;
+  text-decoration: none;
+}
+
+.uploaderLink:hover {
+  color: #fff;
+}
+
+.uploaderName {
+  font-size: 13px;
+  color: #aaa;
+}
+
+.stats {
+  margin: 0;
+  font-size: 12px;
+  color: #777;
+}
+
+/* ── Empty state ─────────────────────────────────────────────────────────── */
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 64px 24px;
+  text-align: center;
+}
+
+.emptyIcon {
+  color: #444;
+}
+
+.emptyText {
+  margin: 0;
+  font-size: 16px;
+  color: #888;
+}
+
+.emptyLink {
+  display: inline-block;
+  padding: 8px 20px;
+  border: 1px solid var(--primary-accent, #ff4500);
+  border-radius: 6px;
+  color: var(--primary-accent, #ff4500);
+  font-size: 13px;
+  text-decoration: none;
+  transition: background 0.15s, color 0.15s;
+}
+
+.emptyLink:hover {
+  background: var(--primary-accent, #ff4500);
+  color: #fff;
+}
+
+/* ── Skeleton shimmer ────────────────────────────────────────────────────── */
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position:  200% 0; }
+}
+
+.skeleton {
+  background: linear-gradient(90deg, #1e1e1e 25%, #2a2a2a 50%, #1e1e1e 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite linear;
+  border-radius: 4px;
+  display: block;
+}
+
+.skeletonRow {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.skeletonThumb {
+  width: 200px;
+  aspect-ratio: 16 / 9;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+
+.skeletonMeta {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.skeletonTitle {
+  height: 16px;
+  width: 80%;
+}
+
+.skeletonLine {
+  height: 13px;
+  width: 50%;
+}
+
+.skeletonLineShort {
+  height: 13px;
+  width: 35%;
+}
+
+/* Responsive */
+@media (max-width: 600px) {
+  .row, .skeletonRow {
+    flex-direction: column;
+  }
+
+  .thumbLink, .skeletonThumb {
+    width: 100%;
+  }
+}

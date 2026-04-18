@@ -22,7 +22,12 @@ export interface Video {
   filename?: string,
   status?: 'processing' | 'processed',
   title?: string,
-  description?: string
+  description?: string,
+  resolutions?: string[],
+  hlsMasterUrl?: string,
+  streamType?: string,
+  progress?: number,
+  processingStage?: string,
 }
 
 async function getVideo(videoId: string) {
@@ -35,6 +40,17 @@ export function setVideo(videoId: string, video: Video) {
     .collection(videoCollectionId)
     .doc(videoId)
     .set(video, { merge: true })
+}
+
+export function updateVideoProgress(
+  videoId: string,
+  progress: number,
+  processingStage: string,
+) {
+  return firestore
+    .collection(videoCollectionId)
+    .doc(videoId)
+    .set({ progress, processingStage }, { merge: true });
 }
 
 export async function isVideoNew(videoId: string) {
