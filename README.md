@@ -33,7 +33,7 @@ The watch page features a fully custom video player built on the HTML5 `<video>`
 When a video description contains timestamps (`0:00 Intro`, `1:30 Section`), chapter markers are rendered on the progress bar and a clickable chapter list appears below the description. If the video is part of a playlist, a sidebar shows the full track list with current position, previous/next navigation, and auto-advance on video end. A share button copies the page URL to clipboard with a toast confirmation.
 
 <p align="center">
-  <img src="screenshots/watch_page.png" width="90%"/>
+  <img src="screenshots/watch_page.png"/>
 </p>
 
 ---
